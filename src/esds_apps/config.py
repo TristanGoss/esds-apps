@@ -29,18 +29,3 @@ If you'd like a physical card instead of or in addition
 to this digital one, please contact info@esds.org.uk
 to request a physical card.
 """
-
-MAIL_HTML_TEMPLATE = f"""
-<html>
-  <body>
-    <h2>Welcome to the Edinburgh Swing Dance Society!</h2>
-    <p>Here is your QR code:</p>
-    <img src="cid:qr_code_cid" alt="QR Code" />
-    <p>
-      <a href="https://yourdomain.com/card.pkpass">
-        <button style="padding:10px;font-size:16px;">Add to Apple Wallet</button>
-      </a>
-    </p>
-  </body>
-</html>
-"""
