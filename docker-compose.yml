@@ -1,0 +1,25 @@
+version: "3.8"
+services:
+  esds-apps:
+    build: .
+    container_name: esds-apps
+    restart: always
+    expose:
+    - "8080"
+    volumes:
+      - esds_cache:/tmp/esds_cache
+
+  nginx:
+    image: nginx:stable
+    container_name: nginx
+    ports:
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/backend-common.conf:/etc/nginx/includes/backend-common.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - esds-apps
+
+volumes:
+  esds_cache:
