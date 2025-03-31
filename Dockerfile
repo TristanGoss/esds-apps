@@ -5,6 +5,14 @@ WORKDIR /app
 RUN pip install poetry
 COPY pyproject.toml poetry.lock /app/
 
+# Install Cairosvg dependencies
+RUN apt-get update && apt-get install -y \
+    libcairo2 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf2.0-0 \
+    fonts-dejavu-core \
+
 # Install python dependencies only as a separate layer (for speed in rebuilding)
 RUN poetry install --no-root
 

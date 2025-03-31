@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>ESDS Membership</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+
+        .email-container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: #ffffff;
+            padding: 20px;
+            border-radius: 4px;
+            color: #000000;
+        }
+
+        .header {
+            text-align: center;
+            padding: 20px 10px;
+        }
+
+        .header img {
+            max-width: 100%;
+            height: auto;
+        }
+
+        .divider {
+            margin: 20px auto;
+            text-align: center;
+        }
+
+        .divider img {
+            width: 100%;
+            max-width: 500px;
+        }
+
+        .membership-card {
+            margin: 20px auto;
+            text-align: center;
+        }
+
+        .membership-card img {
+            max-width: 100%;
+            height: auto;
+        }
+
+        .section {
+            margin-top: 20px;
+        }
+
+        .section h2 {
+            color: #007bff;
+            font-size: 18px;
+            margin-bottom: 10px;
+        }
+
+        .section p {
+            color: #000000;
+            margin: 0 0 10px;
+            line-height: 1.6;
+        }
+
+        .footer {
+            font-size: 12px;
+            color: #888;
+            text-align: center;
+            margin-top: 40px;
+            padding-top: 10px;
+            border-top: 1px solid #ccc;
+        }
+
+        .footer img.logo {
+            margin-top: 10px;
+            max-height: 60px;
+        }
+
+        .social-icons {
+            margin-top: 10px;
+        }
+
+        .social-icons a {
+            display: inline-block;
+            margin: 0 5px;
+        }
+
+        .social-icons img {
+            height: 30px;
+            width: 30px;
+        }
+
+        a {
+            color: #007bff;
+            text-decoration: none;
+        }
+    </style>
+</head>
+
+<body style="margin: 0; padding: 0;">
+    <table role="presentation" cellpadding="0" cellspacing="0" width="100%"
+        background="cid:email_background_cid" style="background-repeat: repeat; background-size: auto;">
+        <tr>
+            <td style="padding-top: 40px; padding-bottom: 40px;">
+                <div class="email-container">
+
+                    <div class="header">
+                        <img src="cid:big_logo_cid" alt="Edinburgh Swing Dance Society Logo" />
+                    </div>
+
+                    <div class="divider">
+                        <img src="cid:divider_cid" alt="Fancy Divider" />
+                    </div>
+
+                    <div class="section">
+                        <p>
+                            Hi {{ first_name }},
+                        </p>
+                        <h2>You're now a Member of the Edinburgh Swing Dance Society!</h2>
+                        <p>
+                            Many thanks for choosing to purchase a membership with us! Your membership is valid
+                            until the end of the calendar year. It entitles you to vote in our Annual General Meeting,
+                            and to reduced prices for our events. In order to claim these benefits, you must bring
+                            your membership card (attached and shown below) with you and show it to our volunteers
+                            on the door. They will scan the QR code to verify your membership.
+                        </p>
+                        <p>
+                            We're very happy for you to use this digital membership card, but if you'd like a
+                            physical one as well,
+                            please email info@esds.org.uk to request one; We'll have one prepared for you to collect
+                            on one of our regular Thursdays within a week or two. We're also happy for you to print
+                            this card off in any medium you wish, provided the card can still be read by both human
+                            and machine.
+                        </p>
+                    </div>
+
+                    <div class="divider">
+                        <img src="cid:divider_cid" alt="Fancy Divider" />
+                    </div>
+
+                    <div class="membership-card">
+                        <img src="cid:membership_card_cid" alt="Membership Card" />
+                    </div>
+
+                    <div class="divider">
+                        <img src="cid:divider_cid" alt="Fancy Divider" />
+                    </div>
+
+                    <div class="section">
+                        <h2>Volunteering</h2>
+                        <p>
+                            ESDS is entirely run by volunteers, and we are always looking for new volunteers to join
+                            us on class and
+                            event nights.
+                        </p>
+                        <p>
+                            Volunteering can take many forms including DJs, Teachers, Event Staff, Door Staff, and
+                            many more. Anyone
+                            volunteering does not have to pay on nights they volunteer!
+                        </p>
+                        <p>
+                            If you are interested in learning more, please email <a
+                                href="mailto:info@esds.org.uk">info@esds.org.uk</a>
+                            and a member of the committee be in touch.
+                        </p>
+                    </div>
+
+                    <div class="footer">
+                        <p>
+                            You are receiving this email because you signed up for an Edinburgh Swing Dance Society
+                            membership.
+                            You'll only receive this email once. If you lose your membership card, please email
+                            <a href="mailto:info@esds.org.uk">info@esds.org.uk</a> to ask for a replacement digital
+                            or physical card.
+                        </p>
+
+                        <div class="social-icons">
+                            <a href="https://www.facebook.com/EdinburghSwingDanceSociety">
+                                <img src="cid:facebook_icon_cid" alt="Facebook" />
+                            </a>
+                            <a href="https://www.instagram.com/edi.swing.soc/">
+                                <img src="cid:instagram_icon_cid" alt="Instagram" />
+                            </a>
+                        </div>
+
+                        <a href="https://esds.org.uk">
+                            <img src="cid:small_logo_cid" alt="ESDS Footer Logo" class="logo" />
+                        </a>
+                    </div>
+                </div>
+            </td>
+        </tr>
+    </table>
+</body>
+
+</html>
