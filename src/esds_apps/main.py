@@ -53,7 +53,7 @@ app.add_middleware(
 
 @app.get('/favicon.ico', include_in_schema=False)
 def favicon():
-    return FileResponse('public/favicon.ico')
+    return FileResponse(config.PUBLIC_DIR / 'favicon.ico')
 
 
 @app.get('/', response_class=HTMLResponse)
