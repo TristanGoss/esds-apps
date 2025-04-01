@@ -4,12 +4,14 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 
-from esds_apps.config import DC_SERVER, LOGGING_LEVEL
+from esds_apps import config
+from esds_apps.auth import password_protected
 from esds_apps.membership_cards import auto_issue_unissued_cards
 
 logging.basicConfig(
-    level=LOGGING_LEVEL,
+    level=config.LOGGING_LEVEL,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
 )
 
@@ -37,7 +39,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         'https://www.dancecloud.com',
-        DC_SERVER,
+        config.DC_SERVER,
     ],
     allow_credentials=True,
     allow_methods=['*'],
@@ -45,6 +47,7 @@ app.add_middleware(
 )
 
 
-@app.get('/hello_world')
-def hello_world() -> str:
-    return 'Hello There!'
+@app.get('/membership-cards', response_class=HTMLResponse)
+@password_protected
+async def membership_cards_status():
+    return 'Hello there!'

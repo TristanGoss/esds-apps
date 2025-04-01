@@ -6,7 +6,6 @@ import smtplib
 from dataclasses import dataclass
 from datetime import datetime
 from email.message import EmailMessage
-from pathlib import Path
 from smtplib import SMTPResponseException
 from time import sleep
 from typing import List
@@ -14,12 +13,9 @@ from typing import List
 import cairosvg
 import requests
 import segno
-from fastapi.templating import Jinja2Templates
 from lxml import etree
 
 from esds_apps import config
-
-TEMPLATES = Jinja2Templates(directory=Path(__file__).parent.parent.parent / 'assets')
 
 log = logging.getLogger(__name__)
 
@@ -157,7 +153,7 @@ def compose_membership_email(card: MembershipCard) -> EmailMessage:
 
     # Add HTML version.
     msg.add_alternative(
-        TEMPLATES.env.get_template('new_membership_email_template.html').render(
+        config.TEMPLATES.env.get_template('new_membership_email.html').render(
             {'first_name': card.first_name, 'last_name': card.last_name}
         ),
         subtype='html',
@@ -190,7 +186,7 @@ def compose_membership_email(card: MembershipCard) -> EmailMessage:
 def distribute_membership_emails(emails: List[EmailMessage]) -> List[bool]:
     was_email_succesfully_delivered = [False] * len(emails)
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        smtp.login('info@esds.org.uk', config.GMAIL_APP_PASSWORD)
+        smtp.login('info@esds.org.uk', config.SECRETS['GMAIL_APP_PASSWORD'])
         for i, email in enumerate(emails):
             try:
                 log.debug(f'About to send new membership email to {email["To"]}')
