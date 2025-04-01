@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from esds_apps.config import LOGGING_LEVEL
+from esds_apps.config import DC_SERVER, LOGGING_LEVEL
 from esds_apps.membership_cards import auto_issue_unissued_cards
 
 logging.basicConfig(
@@ -36,8 +36,8 @@ app = FastAPI(lifespan=lifespan_manager)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        'https://dancecloud.com',
-        'http://localhost:5173',  # for local development
+        'https://www.dancecloud.com',
+        DC_SERVER,
     ],
     allow_credentials=True,
     allow_methods=['*'],
