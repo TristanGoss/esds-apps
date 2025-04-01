@@ -8,6 +8,16 @@ The first use of this repository is the provision of an add-on for dancecloud.co
 ## Secrets
 Some settings are not present in config.py, and instead need to be provided by creating a `.env` file in the repository after it has been checked out. If you are planning to develop this code further and would like some relevant values for these settings, please email info@esds.org.uk to request them.
 
+## Service install
+It's useful to install this repo as a systemd service:
+```bash
+sudo cp esds-apps.service /etc/systemd/system/esds-apps.service
+sudo systemctl daemon-reexec
+sudo systemctl daemon-reload
+sudo systemctl enable esds-apps.service
+sudo systemctl start esds-apps.service
+```
+
 ## Development setup
 We use Ruff for linting. When developing, please install the pre-commit hooks after installing the package:
 ```bash
