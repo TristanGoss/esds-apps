@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ESDS Membership Cards</title>
+    <style>
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            font-family: sans-serif;
+        }
+        th, td {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+        }
+        th {
+            background-color: #f2f2f2;
+            text-align: left;
+        }
+        tr:nth-child(even) {
+            background-color: #fafafa;
+        }
+    </style>
+</head>
+<body>
+    <h1 style="font-family: Arial, sans-serif;">ESDS Membership Cards</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Card Number</th>
+                <th>First Name</th>
+                <th>Last Name</th>
+                <th>Email</th>
+                <th>Status</th>
+                <th>Expires On</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for card in cards %}
+            <tr>
+                <td>{{ card.card_number }}</td>
+                <td>{{ card.first_name }}</td>
+                <td>{{ card.last_name }}</td>
+                <td>{{ card.email }}</td>
+                <td>{{ card.status.value }}</td>
+                <td>{{ card.expires_at.strftime("%d-%m-%Y") }}</td>
+                <td>
+                    <form action="/membership-cards/{{ card.card_uuid }}/reissue" method="post"  style="display: flex; gap: 0.5rem;">
+                        <select name="reason" required>
+                            <option value="" disabled selected>Reason</option>
+                            <option value="stolen">Stolen</option>
+                            <option value="lost">Lost</option>
+                            <option value="damaged">Damaged</option>
+                        </select>
+                        <button type="submit">Reissue</button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>

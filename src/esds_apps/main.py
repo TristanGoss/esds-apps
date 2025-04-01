@@ -2,12 +2,14 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from esds_apps import config
 from esds_apps.auth import password_protected
+from esds_apps.classes import MembershipCardStatus
+from esds_apps.dancecloud_interface import fetch_membership_cards, reissue_membership_card
 from esds_apps.membership_cards import auto_issue_unissued_cards
 
 logging.basicConfig(
@@ -59,5 +61,15 @@ async def landing_page(request: Request):
 
 @app.api_route('/membership-cards', methods=['GET', 'POST'], response_class=HTMLResponse)
 @password_protected
-async def membership_cards_status(request: Request):
-    return 'Hello there!'
+async def membership_cards(request: Request):
+    return config.TEMPLATES.TemplateResponse(request, 'membership_cards.html', {'cards': fetch_membership_cards()})
+
+
+@app.api_route('/membership-cards/{card_uuid}/reissue', methods=['GET', 'POST'], response_class=RedirectResponse)
+@password_protected
+def reissue_card(request: Request, card_uuid: str, reason: MembershipCardStatus = Form(...)):
+    reissue_membership_card(card_uuid, reason)
+    log.info(f'Reissued card with UUID {card_uuid} because it was {reason}')
+
+    # Redirect back to the table view
+    return RedirectResponse(url='/membership_cards', status_code=303)

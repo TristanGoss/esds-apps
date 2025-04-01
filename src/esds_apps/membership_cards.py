@@ -3,44 +3,20 @@ import json
 import logging
 import os
 import smtplib
-from dataclasses import dataclass
-from datetime import datetime
 from email.message import EmailMessage
-from enum import StrEnum
 from smtplib import SMTPResponseException
 from time import sleep
-from typing import Dict, List, Optional
+from typing import List
 
 import cairosvg
-import requests
 import segno
 from lxml import etree
 
 from esds_apps import config
+from esds_apps.classes import MembershipCard
+from esds_apps.dancecloud_interface import fetch_membership_cards
 
 log = logging.getLogger(__name__)
-
-
-class MembershipCardStatus(StrEnum):
-    NEW = 'new'
-    ISSUED = 'issued'
-    EXPIRED = 'expired'
-    CANCELLED = 'cancelled'
-    DAMAGED = 'DAMAGED'
-    LOST = 'LOST'
-    STOLEN = 'STOLEN'
-
-
-@dataclass(frozen=True)
-class MembershipCard:
-    card_uuid: str
-    member_uuid: str
-    card_number: int
-    expires_at: datetime
-    first_name: str
-    last_name: str
-    email: str
-    status: MembershipCardStatus
 
 
 def generate_card_face_png(card: MembershipCard) -> bytes:
@@ -105,7 +81,7 @@ async def auto_issue_unissued_cards():
     while True:
         await asyncio.sleep(config.DC_POLL_INTERVAL_S)
         log.info('Dancecloud unissued cards poller awoken.')
-        new_cards = poll_dancecloud_for_membership_cards({'filter[status]': 'new'})
+        new_cards = fetch_membership_cards({'filter[status]': 'new'})
         log.info(f'found {len(new_cards)} new cards to issue.')
 
         # TODO: The "add to Google/Apple wallet" option is non-trivial,
@@ -114,51 +90,14 @@ async def auto_issue_unissued_cards():
         emails = [compose_membership_email(card) for card in new_cards]
         log.info(f'composed {len(emails)} membership emails.')
 
+        # TODO: restore for committee test
         # succesfully_delivered = send_emails(emails)
         # log.info(f'succesfully sent {sum(succesfully_delivered)} emails.')
 
         # for delivered, card in zip(succesfully_delivered, new_cards):
         #     if delivered:
-        #         inform_dancecloud_of_card_issue(card.card_uuid)
+        #         set_dancecloud_card_status(card.card_uuid, MembershipCardStatus.ISSUED)
         log.info('Dancecloud unissued cards poller returning to sleep.')
-
-
-def poll_dancecloud_for_membership_cards(additional_params: Optional[Dict] = None) -> List[MembershipCard]:
-    log.debug('Polling Dancecloud for membership cards...')
-
-    params = {'page[size]': 9999, 'include': 'member'}
-    if additional_params is not None:
-        params.update(additional_params)
-    response = requests.get(
-        f'{config.DC_SERVER}/{config.DC_API_PATH}/membership-cards',
-        headers=config.DC_GET_HEADERS,
-        params=params,
-    )
-    response.raise_for_status()
-
-    # parse the output to extract the bits we care about
-    card_data = response.json()['data']
-    member_data = [x for x in response.json()['included'] if x['type'] == 'members']
-    cards = []
-
-    for d in card_data:
-        member_details = [x for x in member_data if x['id'] == d['relationships']['member']['data']['id']][0]
-        cards.append(
-            MembershipCard(
-                expires_at=datetime.fromisoformat(d['attributes']['expiresAt']),
-                member_uuid=d['relationships']['member']['data']['id'],
-                card_uuid=d['id'],
-                status=MembershipCardStatus(d['attributes']['status']),
-                card_number=d['attributes']['number'],
-                first_name=member_details['attributes']['firstName'],
-                last_name=member_details['attributes']['lastName'],
-                email=member_details['attributes']['email'],
-            )
-        )
-
-    log.debug(f'Found {len(cards)} membership cards.')
-
-    return cards
 
 
 def compose_membership_email(card: MembershipCard) -> EmailMessage:
@@ -219,14 +158,3 @@ def send_emails(emails: List[EmailMessage]) -> List[bool]:
             sleep(config.MAIL_SEND_INTERVAL_S)
 
     return was_email_succesfully_delivered
-
-
-def inform_dancecloud_of_card_issue(card_uuid: str) -> None:
-    response = requests.patch(
-        f'{config.DC_SERVER}/{config.DC_API_PATH}/membership-cards/{card_uuid}',
-        headers={config.DC_PATCH_HEADERS},
-        data={'data': {'type': 'membership-cards', 'id': card_uuid, 'attributes': {'status': 'issued'}}},
-    )
-    response.raise_for_status()
-
-    log.debug(f'Informed Dancecloud that membership card with ID {card_uuid} has been issued.')

@@ -40,6 +40,9 @@ def password_protected(route_func: Callable) -> Callable:
     A simple auth method that can be easily shared between people.
     Once a person has logged in, they get a cookie allowing them to
     access other routes wrapped with this decorator without having to login.
+
+    Remember, all routes decorated with this must support both GET and POST methods,
+    and must have the request as their first argument!
     """
 
     @wraps(route_func)
