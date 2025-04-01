@@ -19,7 +19,7 @@ AUTH_MAX_LOGIN_ATTEMPTS = 10
 AUTH_MAX_LOGIN_ATTEMPTS_TIMEOUT_S = 4 * 60 * 60
 
 PUBLIC_DIR = directory = Path(__file__).resolve().parent.parent.parent / 'public'
-TEMPLATES = Jinja2Templates(directory=Path(__file__).parent.parent.parent / 'templates')
+TEMPLATES = Jinja2Templates(directory=Path(__file__).resolve().parent.parent.parent / 'templates')
 
 CARD_DPI = 300
 
