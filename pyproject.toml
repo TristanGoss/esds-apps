@@ -23,7 +23,7 @@ packages = [{include = "esds_apps", from = "src"}]
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = "^4.2.0"
-ruff = "^0.11.2"
+ruff = "0.11.2"
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
