@@ -1,0 +1,10 @@
+{
+    "python.formatting.provider": "none",
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.organizeImports": false
+    },
+    "ruff.enable": true,
+    "ruff.format": true,
+    "python.linting.enabled": false
+  }

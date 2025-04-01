@@ -21,6 +21,40 @@ dependencies = [
 packages = [{include = "esds_apps", from = "src"}]
 
 
+[tool.poetry.group.dev.dependencies]
+pre-commit = "^4.2.0"
+ruff = "^0.11.2"
+
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "C90",      # Cyclomatic complexity
+    "D",        # pydocstyle
+    "E",        # pycodestyle
+    "F",        # pyflakes
+    "I",        # Sort imports
+    "PLR",      # pylint
+]
+ignore = [
+    "D100",  # no module docstring
+    "D101",  # no class docstring
+    "D103",  # no function docstring
+    "D104",  # no package docstring
+    "D105",  # no magic method docstring
+    "D107",  # no __init__ docstring
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.format]
+quote-style = "single"

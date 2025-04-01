@@ -1,16 +1,16 @@
 import asyncio
-from contextlib import asynccontextmanager
 import logging
+from contextlib import asynccontextmanager
 
-from esds_apps.config import LOGGING_LEVEL
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from esds_apps.config import LOGGING_LEVEL
 from esds_apps.membership_cards import auto_issue_unissued_cards
 
 logging.basicConfig(
     level=LOGGING_LEVEL,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    format='%(asctime)s [%(levelname)s] %(name)s: %(message)s',
 )
 
 log = logging.getLogger(__name__)
@@ -27,7 +27,7 @@ async def lifespan_manager(_: FastAPI):
         try:
             await dc_poller
         except asyncio.CancelledError:
-            log.debug("Dancecloud unissued card poller shutdown")
+            log.debug('Dancecloud unissued card poller shutdown')
 
 
 app = FastAPI(lifespan=lifespan_manager)
@@ -36,15 +36,15 @@ app = FastAPI(lifespan=lifespan_manager)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://dancecloud.com",
-        "http://localhost:5173",  # for local development
+        'https://dancecloud.com',
+        'http://localhost:5173',  # for local development
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=['*'],
+    allow_headers=['*'],
 )
 
 
-@app.get("/hello_world")
+@app.get('/hello_world')
 def hello_world() -> str:
-    return "Hello There!"
+    return 'Hello There!'
