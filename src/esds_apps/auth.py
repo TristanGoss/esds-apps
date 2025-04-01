@@ -1,9 +1,10 @@
 import logging
 import re
 from functools import wraps
+from http import HTTPStatus
 from typing import Callable
 
-from fastapi import Request
+from fastapi import HTTPException, Request
 from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, SignatureExpired, TimestampSigner
 
@@ -34,7 +35,25 @@ def is_cookie_valid(cookie_value: str, client_host: str) -> bool:
         return False
 
 
-def password_protected(route_func: Callable) -> Callable:
+def require_valid_cookie(request: Request) -> None:
+    """Raise an error unless he user has a valid cookie.
+
+    A cut-down alternative to the password_protected wrapper below,
+    for use with Depends()
+    """
+    # Check for valid cookie
+    cookie = request.cookies.get(config.AUTH_COOKIE_NAME)
+    client_host = request.client.host
+
+    if not cookie or not is_cookie_valid(cookie, client_host):
+        log.warning(f'host {client_host} failed to authenticate with their cookie.')
+        raise HTTPException(
+            status_code=HTTPStatus.UNAUTHORIZED,
+            detail='This route requires an authentication cookie, but either you do not have one or it is invalid.',
+        )
+
+
+def password_auth(route_func: Callable) -> Callable:
     """Prevent route access until a password has been provided.
 
     A simple auth method that can be easily shared between people.

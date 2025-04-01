@@ -1,13 +1,15 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from io import BytesIO
+from typing import List
 
-from fastapi import FastAPI, Form, Request
+from fastapi import Depends, FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
 
 from esds_apps import config
-from esds_apps.auth import password_protected
+from esds_apps.auth import password_auth, require_valid_cookie
 from esds_apps.classes import MembershipCardStatus
 from esds_apps.dancecloud_interface import fetch_membership_cards, reissue_membership_card
 from esds_apps.membership_cards import auto_issue_unissued_cards
@@ -60,16 +62,33 @@ async def landing_page(request: Request):
 
 
 @app.api_route('/membership-cards', methods=['GET', 'POST'], response_class=HTMLResponse)
-@password_protected
+@password_auth
 async def membership_cards(request: Request):
     return config.TEMPLATES.TemplateResponse(request, 'membership_cards.html', {'cards': fetch_membership_cards()})
 
 
-@app.api_route('/membership-cards/{card_uuid}/reissue', methods=['GET', 'POST'], response_class=RedirectResponse)
-@password_protected
-def reissue_card(request: Request, card_uuid: str, reason: MembershipCardStatus = Form(...)):
+@app.post('/membership-cards/{card_uuid}/reissue', response_class=RedirectResponse)
+def reissue_card(
+    request: Request, card_uuid: str, reason: MembershipCardStatus = Form(...), _: None = Depends(require_valid_cookie)
+):
     reissue_membership_card(card_uuid, reason)
     log.info(f'Reissued card with UUID {card_uuid} because it was {reason}')
 
     # Redirect back to the table view
     return RedirectResponse(url='/membership_cards', status_code=303)
+
+
+@app.post('/membership-cards/download/pdf', response_class=StreamingResponse)
+def download_selected_cards(
+    request: Request, card_uuid: List[str] = Form(...), _: None = Depends(require_valid_cookie)
+):
+    # TODO: fill in printable PDF generation.
+    buffer = BytesIO()
+    buffer.write(b'%PDF-1.4\n...fake content...\n%%EOF')
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type='application/pdf',
+        headers={'Content-Disposition': 'attachment; filename=esds_membership_cards.pdf'},
+    )

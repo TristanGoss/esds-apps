@@ -3,6 +3,12 @@
 <head>
     <title>ESDS Membership Cards</title>
     <style>
+        h1 {
+            font-family: Arial, sans-serif;
+        }
+        label {
+            font-family: Arial, sans-serif;
+        }
         table {
             border-collapse: collapse;
             width: 100%;
@@ -19,45 +25,136 @@
         tr:nth-child(even) {
             background-color: #fafafa;
         }
+        td.select-cell {
+            text-align: center;
+            vertical-align: middle;
+        }
+        input[type="checkbox"] {
+            width: 1.5em;
+            height: 1.5em;
+            cursor: pointer;
+        }
+        #download-pdf-btn {
+            margin-bottom: 1rem;
+            margin-left: 1rem;
+        }
+        #reissue-form {
+            display: flex;
+            gap: 0.5rem;
+        }
     </style>
 </head>
 <body>
-    <h1 style="font-family: Arial, sans-serif;">ESDS Membership Cards</h1>
-    <table>
-        <thead>
-            <tr>
-                <th>Card Number</th>
-                <th>First Name</th>
-                <th>Last Name</th>
-                <th>Email</th>
-                <th>Status</th>
-                <th>Expires On</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for card in cards %}
-            <tr>
-                <td>{{ card.card_number }}</td>
-                <td>{{ card.first_name }}</td>
-                <td>{{ card.last_name }}</td>
-                <td>{{ card.email }}</td>
-                <td>{{ card.status.value }}</td>
-                <td>{{ card.expires_at.strftime("%d-%m-%Y") }}</td>
-                <td>
-                    <form action="/membership-cards/{{ card.card_uuid }}/reissue" method="post"  style="display: flex; gap: 0.5rem;">
-                        <select name="reason" required>
+    <h1>ESDS Membership Cards</h1>
+    <form action="/membership-cards/download/pdf" method="post">
+        <label for="filter-first-name">Filter by First Name:</label>
+        <input type="text" id="filter-first-name" placeholder="e.g. Alice">
+        <button type="submit" id="download-pdf-btn" disabled>Download selected cards as PDF</button>
+        <table>
+            <thead>
+                <tr>
+                    <th>Select</th>
+                    <th>Card Number</th>
+                    <th>First Name</th>
+                    <th>Last Name</th>
+                    <th>Email</th>
+                    <th>Status</th>
+                    <th>Expires On</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for card in cards %}
+                <tr>
+                    <td class="select-cell">
+                        <input type="checkbox" name="card_uuid" value="{{ card.card_uuid }}">
+                    </td>
+                    <td>{{ card.card_number }}</td>
+                    <td>{{ card.first_name }}</td>
+                    <td>{{ card.last_name }}</td>
+                    <td>{{ card.email }}</td>
+                    <td>{{ card.status.value }}</td>
+                    <td>{{ card.expires_at.strftime("%d-%m-%Y") }}</td>
+                    <td>
+                        <select id="reason-{{ card.card_uuid }}" onchange="updateReissueButton('{{ card.card_uuid }}')">
                             <option value="" disabled selected>Reason</option>
                             <option value="stolen">Stolen</option>
                             <option value="lost">Lost</option>
                             <option value="damaged">Damaged</option>
                         </select>
-                        <button type="submit">Reissue</button>
-                    </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
+                        <button type="button"  id="reissue-btn-{{ card.card_uuid }}" onclick="submitReissue('{{ card.card_uuid }}', '{{ card.first_name }}')" disabled>Reissue</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </form>
+    <script>
+        document.addEventListener("DOMContentLoaded", function () {
+            // enable the download pdf button only if at least one card is selected.
+            const checkboxes = document.querySelectorAll('input[name="card_uuid"]');
+            const downloadBtn = document.getElementById("download-pdf-btn");
+        
+            function updateButtonState() {
+                const anyChecked = Array.from(checkboxes).some(cb => cb.checked);
+                downloadBtn.disabled = !anyChecked;
+            }
+        
+            checkboxes.forEach(cb => {
+                cb.addEventListener("change", updateButtonState);
+            });
+        
+            updateButtonState(); // Set initial state
+        });
+
+        document.addEventListener("DOMContentLoaded", function () {
+            // filter the table based on the provided first name
+            const input = document.getElementById("filter-first-name");
+            const rows = document.querySelectorAll("tbody tr");
+
+            input.addEventListener("input", function () {
+                const filterValue = input.value.toLowerCase().trim();
+
+                rows.forEach(row => {
+                    const firstNameCell = row.cells[2];  // First name is in the 3rd column
+                    const firstName = firstNameCell.textContent.toLowerCase();
+                    row.style.display = firstName.includes(filterValue) ? "" : "none";
+                });
+            });
+        });
+
+        function updateReissueButton(cardUuid) {
+            // ensure reissue button is only enabled if a reason is selected
+            const reasonSelect = document.getElementById(`reason-${cardUuid}`);
+            const button = document.getElementById(`reissue-btn-${cardUuid}`);
+            button.disabled = !reasonSelect.value;
+        }
+
+        function submitReissue(cardUuid, cardFirstName) {
+            const reasonSelect = document.getElementById(`reason-${cardUuid}`);
+            const reason = reasonSelect.value;
+
+            if (!reason) return;
+
+            const confirmMsg = `Are you sure you want to reissue the membership card belonging to ${cardFirstName} because it has been ${reason}?`;
+            const confirmed = window.confirm(confirmMsg);
+
+            if (!confirmed) return;
+
+            // Create and submit a form dynamically
+            const form = document.createElement("form");
+            form.method = "POST";
+            form.action = `/membership-cards/${cardUuid}/reissue`;
+
+            const input = document.createElement("input");
+            input.type = "hidden";
+            input.name = "reason";
+            input.value = reason;
+
+            form.appendChild(input);
+            document.body.appendChild(form);
+            form.submit();
+        }
+    </script>
 </body>
 </html>
