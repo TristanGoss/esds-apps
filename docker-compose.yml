@@ -6,7 +6,7 @@ services:
     expose:
     - "8080"
     volumes:
-      - esds_cache:/tmp/esds_cache
+      - ./esds_cache:/tmp/esds_cache
 
   nginx:
     image: nginx:stable
@@ -19,6 +19,3 @@ services:
       - /etc/letsencrypt:/etc/letsencrypt:ro
     depends_on:
       - esds-apps
-
-volumes:
-  esds_cache:

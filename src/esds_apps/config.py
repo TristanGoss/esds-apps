@@ -6,7 +6,7 @@ from fastapi.templating import Jinja2Templates
 
 LOGGING_LEVEL = logging.DEBUG
 
-CACHE_ROOT = '.'
+CACHE_ROOT = '/tmp/esds_cache'
 
 SECRETS = dotenv_values('.env')
 for var_name in ['DC_API_TOKEN', 'GMAIL_APP_PASSWORD', 'UI_PASSWORD']:
