@@ -1,20 +1,24 @@
 import logging
-import os
 from pathlib import Path
 
+from dotenv import dotenv_values
 from fastapi.templating import Jinja2Templates
 
 LOGGING_LEVEL = logging.DEBUG
 
-SECRETS = {}
-for var_name in ['DC_API_TOKEN', 'GMAIL_APP_PASSWORD', 'UI_PASSWORD']:
-    SECRETS[var_name] = os.getenv(var_name)
-    if SECRETS[var_name] is None:
-        raise RuntimeError(f'Environment variable {var_name} has not been set.')
-AUTH_COOKIE_NAME = 'esds_apps_auth'
-AUTH_COOKIE_TTL_SECONDS = 86400
+CACHE_ROOT = '/tmp/esds_cache'
 
-ASSETS_PATH = directory = Path(__file__).parent.parent.parent / 'assets'
+SECRETS = dotenv_values('.env')
+for var_name in ['DC_API_TOKEN', 'GMAIL_APP_PASSWORD', 'UI_PASSWORD']:
+    if var_name not in SECRETS:
+        raise RuntimeError(f'Environment variable {var_name} is missing from the .env file.')
+
+AUTH_COOKIE_NAME = 'esds_apps_auth'
+AUTH_COOKIE_TIMEOUT_SECONDS = 24 * 60 * 60
+AUTH_MAX_LOGIN_ATTEMPTS = 10
+AUTH_MAX_LOGIN_ATTEMPTS_TIMEOUT_S = 4 * 60 * 60
+
+PUBLIC_DIR = directory = Path(__file__).parent.parent.parent / 'public'
 TEMPLATES = Jinja2Templates(directory=Path(__file__).parent.parent.parent / 'templates')
 
 CARD_DPI = 300
@@ -36,3 +40,4 @@ If you'd like a physical card instead of or in addition
 to this digital one, please contact info@esds.org.uk
 to request a physical card.
 """
+MAIL_SEND_INTERVAL_S = 1

@@ -18,7 +18,9 @@ RUN poetry install --no-root
 
 COPY ./README.md /app/README.md
 COPY ./src /app/src
+
 # Remember this file is not present in the repo, you need to add it manually!
+# It contains the secrets that are not stored in the repository
 COPY ./.env /app/.env
 
 ENV PYTHONPATH=/app/src

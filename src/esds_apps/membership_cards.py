@@ -6,9 +6,10 @@ import smtplib
 from dataclasses import dataclass
 from datetime import datetime
 from email.message import EmailMessage
+from enum import StrEnum
 from smtplib import SMTPResponseException
 from time import sleep
-from typing import List
+from typing import Dict, List, Optional
 
 import cairosvg
 import requests
@@ -20,6 +21,16 @@ from esds_apps import config
 log = logging.getLogger(__name__)
 
 
+class MembershipCardStatus(StrEnum):
+    NEW = 'new'
+    ISSUED = 'issued'
+    EXPIRED = 'expired'
+    CANCELLED = 'cancelled'
+    DAMAGED = 'DAMAGED'
+    LOST = 'LOST'
+    STOLEN = 'STOLEN'
+
+
 @dataclass(frozen=True)
 class MembershipCard:
     card_uuid: str
@@ -29,11 +40,13 @@ class MembershipCard:
     first_name: str
     last_name: str
     email: str
+    status: MembershipCardStatus
 
 
 def generate_card_face_png(card: MembershipCard) -> bytes:
     # load the static svg template
-    with open(config.ASSETS_PATH / 'membership_card_background.svg', 'rb') as f:
+    # TODO: Replace with Melinda's work and update the positioning & fonts
+    with open(config.PUBLIC_DIR / 'membership_card_background.svg', 'rb') as f:
         background = etree.parse(f)
 
     # fetch own QR code
@@ -91,44 +104,51 @@ async def auto_issue_unissued_cards():
     log.debug('Dancecloud unissued cards poller started.')
     while True:
         await asyncio.sleep(config.DC_POLL_INTERVAL_S)
-        poll_dancecloud_for_unissued_cards()
+        log.info('Dancecloud unissued cards poller awoken.')
+        new_cards = poll_dancecloud_for_membership_cards({'filter[status]': 'new'})
+        log.info(f'found {len(new_cards)} new cards to issue.')
 
-        # TODO: Generate ESDS membership cards
-        # need Melinda's new versions for this, and to have them as SVG.
+        # TODO: The "add to Google/Apple wallet" option is non-trivial,
+        # since it's certified proof.
 
-        # TODO: The "add to Google/Apple wallet" option is actually
-        # quite hard, since it's certified proof.
+        emails = [compose_membership_email(card) for card in new_cards]
+        log.info(f'composed {len(emails)} membership emails.')
 
-        # TODO: Email ESDS membership cards to new members
-        # Let's do this without sendgrid, for simplicity.
+        # succesfully_delivered = send_emails(emails)
+        # log.info(f'succesfully sent {sum(succesfully_delivered)} emails.')
 
-        # TODO: Update membership card status to 'issued'
-        # already implemented below.
+        # for delivered, card in zip(succesfully_delivered, new_cards):
+        #     if delivered:
+        #         inform_dancecloud_of_card_issue(card.card_uuid)
+        log.info('Dancecloud unissued cards poller returning to sleep.')
 
 
-def poll_dancecloud_for_unissued_cards() -> List[MembershipCard]:
-    log.debug('Polling Dancecloud for unissued membership cards...')
+def poll_dancecloud_for_membership_cards(additional_params: Optional[Dict] = None) -> List[MembershipCard]:
+    log.debug('Polling Dancecloud for membership cards...')
 
+    params = {'page[size]': 9999, 'include': 'member'}
+    if additional_params is not None:
+        params.update(additional_params)
     response = requests.get(
         f'{config.DC_SERVER}/{config.DC_API_PATH}/membership-cards',
         headers=config.DC_GET_HEADERS,
-        params={'page[size]': 9999, 'include': 'member', 'filter[status]': 'new'},
+        params=params,
     )
     response.raise_for_status()
 
     # parse the output to extract the bits we care about
     card_data = response.json()['data']
     member_data = [x for x in response.json()['included'] if x['type'] == 'members']
-    unissued_cards = []
+    cards = []
 
     for d in card_data:
         member_details = [x for x in member_data if x['id'] == d['relationships']['member']['data']['id']][0]
-
-        unissued_cards.append(
+        cards.append(
             MembershipCard(
                 expires_at=datetime.fromisoformat(d['attributes']['expiresAt']),
                 member_uuid=d['relationships']['member']['data']['id'],
                 card_uuid=d['id'],
+                status=MembershipCardStatus(d['attributes']['status']),
                 card_number=d['attributes']['number'],
                 first_name=member_details['attributes']['firstName'],
                 last_name=member_details['attributes']['lastName'],
@@ -136,9 +156,9 @@ def poll_dancecloud_for_unissued_cards() -> List[MembershipCard]:
             )
         )
 
-    log.debug(f'Found {len(unissued_cards)} unissued membership cards.')
+    log.debug(f'Found {len(cards)} membership cards.')
 
-    return unissued_cards
+    return cards
 
 
 def compose_membership_email(card: MembershipCard) -> EmailMessage:
@@ -169,11 +189,11 @@ def compose_membership_email(card: MembershipCard) -> EmailMessage:
     msg.add_attachment(qr_code_png, maintype='image', subtype='png', filename=f'membership_card_{card.card_uuid}.png')
 
     # Add the rest of the images used in the template
-    with open(config.ASSETS_PATH / 'new_membership_email_image_to_cid_map.json') as fh:
+    with open(config.PUBLIC_DIR / 'new_membership_email_image_to_cid_map.json') as fh:
         image_to_cid_map = json.load(fh)
 
     for entry in image_to_cid_map:
-        with open(config.ASSETS_PATH / entry['image_path'], 'rb') as f:
+        with open(config.PUBLIC_DIR / entry['image_path'], 'rb') as f:
             msg_html_part.add_related(
                 f.read(),
                 maintype='image',
@@ -183,20 +203,20 @@ def compose_membership_email(card: MembershipCard) -> EmailMessage:
     return msg
 
 
-def distribute_membership_emails(emails: List[EmailMessage]) -> List[bool]:
+def send_emails(emails: List[EmailMessage]) -> List[bool]:
     was_email_succesfully_delivered = [False] * len(emails)
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
         smtp.login('info@esds.org.uk', config.SECRETS['GMAIL_APP_PASSWORD'])
         for i, email in enumerate(emails):
             try:
-                log.debug(f'About to send new membership email to {email["To"]}')
+                log.debug(f'About to send new email to {email["To"]}')
                 smtp.send_message(email)
                 was_email_succesfully_delivered[i] = True
             except SMTPResponseException as e:
                 log.error(
                     f'Email was not delivered; SMTP error: {e.smtp_code} - {e.smtp_error.decode(errors="ignore")}'
                 )
-            sleep(1)
+            sleep(config.MAIL_SEND_INTERVAL_S)
 
     return was_email_succesfully_delivered
 

@@ -2,9 +2,9 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from esds_apps import config
 from esds_apps.auth import password_protected
@@ -47,7 +47,17 @@ app.add_middleware(
 )
 
 
-@app.get('/membership-cards', response_class=HTMLResponse)
+@app.get('/favicon.ico', include_in_schema=False)
+def favicon():
+    return FileResponse('public/favicon.ico')
+
+
+@app.get('/', response_class=HTMLResponse)
+async def landing_page(request: Request):
+    return config.TEMPLATES.TemplateResponse(request, 'landing.html')
+
+
+@app.api_route('/membership-cards', methods=['GET', 'POST'], response_class=HTMLResponse)
 @password_protected
-async def membership_cards_status():
+async def membership_cards_status(request: Request):
     return 'Hello there!'
