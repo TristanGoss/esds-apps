@@ -22,6 +22,9 @@ PUBLIC_DIR = directory = Path(__file__).resolve().parent.parent.parent / 'public
 TEMPLATES = Jinja2Templates(directory=Path(__file__).resolve().parent.parent.parent / 'templates')
 
 CARD_DPI = 300
+A4_SCREEN_PX_PER_MM = 3.77953  # correct conversion for compositing svgs within an A4 html page
+A4_WIDTH_MM = 210
+A4_HEIGHT_MM = 297
 
 DC_API_PATH = 'api/v1'
 DC_SERVER = 'https://esds-test.dancecloud.xyz'

@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+    @page {
+        size: A4;
+        margin: 0;
+    }
+    body {
+        margin: 0;
+        padding: 0;
+    }
+    .sheet {
+        width: 210mm;
+        height: 297mm;
+        padding-top: {{ margin_top_px }}px;
+        padding-left: {{ margin_left_px }}px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: {{ vertical_gap_px }}px {{ horizontal_gap_px }}px;
+        box-sizing: border-box;
+        page-break-after: always;
+    }
+    .card {
+        width: {{ card_width_px }}px;
+        height: {{ card_height_px }}px;
+        box-sizing: border-box;
+    }
+    .card img {
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        display: block;
+    }
+    svg {
+        width: 100%;
+        height: 100%;
+    }
+</style>
+</head>
+<body>
+    {% for page in pages %}
+        <div class="sheet">
+            {% for b64 in page %}
+            <div class="card">
+                <img src="data:image/png;base64,{{ b64 }}" alt="Card" />
+            </div>
+            {% endfor %}
+        </div>
+    {% endfor %}
+</body>
+</html>

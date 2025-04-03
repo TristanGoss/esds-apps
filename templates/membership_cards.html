@@ -2,54 +2,18 @@
 <html>
 <head>
     <title>ESDS Membership Cards</title>
-    <style>
-        h1 {
-            font-family: Arial, sans-serif;
-        }
-        label {
-            font-family: Arial, sans-serif;
-        }
-        table {
-            border-collapse: collapse;
-            width: 100%;
-            font-family: sans-serif;
-        }
-        th, td {
-            padding: 8px 12px;
-            border: 1px solid #ccc;
-        }
-        th {
-            background-color: #f2f2f2;
-            text-align: left;
-        }
-        tr:nth-child(even) {
-            background-color: #fafafa;
-        }
-        td.select-cell {
-            text-align: center;
-            vertical-align: middle;
-        }
-        input[type="checkbox"] {
-            width: 1.5em;
-            height: 1.5em;
-            cursor: pointer;
-        }
-        #download-pdf-btn {
-            margin-bottom: 1rem;
-            margin-left: 1rem;
-        }
-        #reissue-form {
-            display: flex;
-            gap: 0.5rem;
-        }
-    </style>
+    <link rel="icon" href="{{ url_for('public', path='favicon.ico') }}">
+    <link rel="stylesheet" href="{{ url_for('public', path='css/membership_cards.css') }}">
 </head>
 <body>
     <h1>ESDS Membership Cards</h1>
-    <form action="/membership-cards/download/pdf" method="post">
+    <p>Welcome to the Membership Card management page. Here, you can monitor the status of all existing membership cards,
+        reissue them if they are lost, stolen or damaged, and download A4 sheets that can be used to print the cards.
+    </p>
+    <form id="card-selection-form">
         <label for="filter-first-name">Filter by First Name:</label>
         <input type="text" id="filter-first-name" placeholder="e.g. Alice">
-        <button type="submit" id="download-pdf-btn" disabled>Download selected cards as PDF</button>
+        <button type="button" id="download-pdf-btn" disabled>Download selected cards as A4 PDF</button>
         <table>
             <thead>
                 <tr>
@@ -89,72 +53,42 @@
             </tbody>
         </table>
     </form>
-    <script>
-        document.addEventListener("DOMContentLoaded", function () {
-            // enable the download pdf button only if at least one card is selected.
-            const checkboxes = document.querySelectorAll('input[name="card_uuid"]');
-            const downloadBtn = document.getElementById("download-pdf-btn");
-        
-            function updateButtonState() {
-                const anyChecked = Array.from(checkboxes).some(cb => cb.checked);
-                downloadBtn.disabled = !anyChecked;
-            }
-        
-            checkboxes.forEach(cb => {
-                cb.addEventListener("change", updateButtonState);
-            });
-        
-            updateButtonState(); // Set initial state
-        });
-
-        document.addEventListener("DOMContentLoaded", function () {
-            // filter the table based on the provided first name
-            const input = document.getElementById("filter-first-name");
-            const rows = document.querySelectorAll("tbody tr");
-
-            input.addEventListener("input", function () {
-                const filterValue = input.value.toLowerCase().trim();
-
-                rows.forEach(row => {
-                    const firstNameCell = row.cells[2];  // First name is in the 3rd column
-                    const firstName = firstNameCell.textContent.toLowerCase();
-                    row.style.display = firstName.includes(filterValue) ? "" : "none";
-                });
-            });
-        });
-
-        function updateReissueButton(cardUuid) {
-            // ensure reissue button is only enabled if a reason is selected
-            const reasonSelect = document.getElementById(`reason-${cardUuid}`);
-            const button = document.getElementById(`reissue-btn-${cardUuid}`);
-            button.disabled = !reasonSelect.value;
-        }
-
-        function submitReissue(cardUuid, cardFirstName) {
-            const reasonSelect = document.getElementById(`reason-${cardUuid}`);
-            const reason = reasonSelect.value;
-
-            if (!reason) return;
-
-            const confirmMsg = `Are you sure you want to reissue the membership card belonging to ${cardFirstName} because it has been ${reason}?`;
-            const confirmed = window.confirm(confirmMsg);
-
-            if (!confirmed) return;
-
-            // Create and submit a form dynamically
-            const form = document.createElement("form");
-            form.method = "POST";
-            form.action = `/membership-cards/${cardUuid}/reissue`;
-
-            const input = document.createElement("input");
-            input.type = "hidden";
-            input.name = "reason";
-            input.value = reason;
-
-            form.appendChild(input);
-            document.body.appendChild(form);
-            form.submit();
-        }
-    </script>
+    <div id="printModal" class="modal">
+        <div class="modal-content">
+            <span class="close" id="modalClose">&times;</span>
+            <h2>Print Layout Settings</h2>
+            <p>
+                Please specify the margins for the A4 print layout for the selected cards.
+            </p>
+            <form id="layout-form" method="POST" action="/membership-cards/print-layout/pdf">
+                <div class="print-layout-form-row">
+                    <label for="card-width">Card Width (mm):</label>
+                    <input id="card-width" type="number" name="card_width_mm" value="85.6" required>
+                </div>
+                <div class="print-layout-form-row">
+                    <label for="card-height">Card Height (mm):</label>
+                    <input id="card-height" type="number" name="card_height_mm" value="54" required>
+                </div>
+                <div class="print-layout-form-row">
+                    <label for="margin-top">Top Margin (mm):</label>
+                    <input id="margin-top" type="number" name="margin_top_mm" value="3.5" required>
+                </div>
+                <div class="print-layout-form-row">
+                    <label for="margin-left">Left Margin (mm):</label>
+                    <input id="margin-left" type="number" name="margin_left_mm" value="16.9" required>
+                </div>
+                <div class="print-layout-form-row">
+                    <label for="horizontal-gap">Horizontal Gap (mm):</label>
+                    <input id="horizontal-gap" type="number" name="horizontal_gap_mm" value="5" required>
+                </div>
+                <div class="print-layout-form-row">
+                    <label for="vertical-gap">Vertical Gap (mm):</label>
+                    <input id="vertical-gap" type="number" name="vertical_gap_mm" value="5" required>
+                </div>
+            </form>
+            <button type="submit" form="layout-form">Generate PDF</button>
+        </div>
+    </div>
+    <script src="{{ url_for('public', path='js/membership_cards.js') }}"></script>
 </body>
 </html>

@@ -23,3 +23,9 @@ class MembershipCard:
     last_name: str
     email: str
     status: MembershipCardStatus
+
+
+class PrintablePdfError(ValueError):
+    """Raised when card layout settings exceed printable space."""
+
+    pass

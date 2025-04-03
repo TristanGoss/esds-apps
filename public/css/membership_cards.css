@@ -1,0 +1,88 @@
+@import url("base.css");
+
+label {
+    font-family: Arial, sans-serif;
+}
+
+table {
+    border-collapse: collapse;
+    width: 100%;
+    font-family: sans-serif;
+}
+
+th, td {
+    padding: 8px 12px;
+    border: 1px solid #ccc;
+}
+
+th {
+    background-color: #f2f2f2;
+    text-align: left;
+}
+
+tr:nth-child(even) {
+    background-color: #fafafa;
+}
+
+td.select-cell {
+    text-align: center;
+    vertical-align: middle;
+}
+
+input[type="checkbox"] {
+    width: 1.5em;
+    height: 1.5em;
+    cursor: pointer;
+}
+
+#download-pdf-btn {
+    margin-bottom: 1rem;
+    margin-left: 1rem;
+}
+
+#reissue-form {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 100;
+    padding-top: 5%;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    overflow: auto;
+    background-color: rgba(0,0,0,0.4);
+}
+
+.modal-content {
+    background-color: #fff;
+    margin: auto;
+    padding: 2rem;
+    border: 1px solid #888;
+    width: 50%;
+    font-family: sans-serif;
+}
+
+.close {
+    float: right;
+    font-size: 1.5rem;
+    font-weight: bold;
+    cursor: pointer;
+}
+
+.print-layout-form-row {
+    margin-bottom: 1rem;
+}
+
+.print-layout-form-row label {
+    display: inline-block;
+    width: 200px;
+}
+
+.print-layout-form-row input {
+    width: 100px;
+}

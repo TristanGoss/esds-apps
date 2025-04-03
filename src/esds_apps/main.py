@@ -6,13 +6,14 @@ from typing import List
 
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from esds_apps import config
 from esds_apps.auth import password_auth, require_valid_cookie
-from esds_apps.classes import MembershipCardStatus
+from esds_apps.classes import MembershipCardStatus, PrintablePdfError
 from esds_apps.dancecloud_interface import fetch_membership_cards, reissue_membership_card
-from esds_apps.membership_cards import auto_issue_unissued_cards
+from esds_apps.membership_cards import auto_issue_unissued_cards, printable_pdf
 
 logging.basicConfig(
     level=config.LOGGING_LEVEL,
@@ -37,6 +38,7 @@ async def lifespan_manager(_: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan_manager)
+app.mount('/public', StaticFiles(directory=config.PUBLIC_DIR), name='public')
 
 
 app.add_middleware(
@@ -51,11 +53,6 @@ app.add_middleware(
 )
 
 
-@app.get('/favicon.ico', include_in_schema=False)
-def favicon():
-    return FileResponse(config.PUBLIC_DIR / 'favicon.ico')
-
-
 @app.get('/', response_class=HTMLResponse)
 async def landing_page(request: Request):
     return config.TEMPLATES.TemplateResponse(request, 'landing.html')
@@ -68,7 +65,7 @@ async def membership_cards(request: Request):
 
 
 @app.post('/membership-cards/{card_uuid}/reissue', response_class=RedirectResponse)
-def reissue_card(
+async def reissue_card(
     request: Request, card_uuid: str, reason: MembershipCardStatus = Form(...), _: None = Depends(require_valid_cookie)
 ):
     reissue_membership_card(card_uuid, reason)
@@ -78,17 +75,35 @@ def reissue_card(
     return RedirectResponse(url='/membership_cards', status_code=303)
 
 
-@app.post('/membership-cards/download/pdf', response_class=StreamingResponse)
-def download_selected_cards(
-    request: Request, card_uuid: List[str] = Form(...), _: None = Depends(require_valid_cookie)
+@app.post('/membership-cards/print-layout/pdf', response_class=StreamingResponse)
+def download_selected_cards(  # noqa: PLR0913
+    request: Request,
+    card_width_mm: float = Form(...),
+    card_height_mm: float = Form(...),
+    margin_top_mm: float = Form(...),
+    margin_left_mm: float = Form(...),
+    horizontal_gap_mm: float = Form(...),
+    vertical_gap_mm: float = Form(...),
+    card_uuids: List[str] = Form(...),
+    _: None = Depends(require_valid_cookie),
 ):
-    # TODO: fill in printable PDF generation.
-    buffer = BytesIO()
-    buffer.write(b'%PDF-1.4\n...fake content...\n%%EOF')
-    buffer.seek(0)
+    try:
+        pdf_bytes = printable_pdf(
+            request=request,
+            card_width_mm=card_width_mm,
+            card_height_mm=card_height_mm,
+            margin_top_mm=margin_top_mm,
+            margin_left_mm=margin_left_mm,
+            horizontal_gap_mm=horizontal_gap_mm,
+            vertical_gap_mm=vertical_gap_mm,
+            card_uuids=card_uuids,
+        )
+
+    except PrintablePdfError as e:
+        return config.TEMPLATES.TemplateResponse(request, 'pdf_card_error.html', {'message': str(e)}, status_code=400)
 
     return StreamingResponse(
-        buffer,
+        BytesIO(pdf_bytes),
         media_type='application/pdf',
         headers={'Content-Disposition': 'attachment; filename=esds_membership_cards.pdf'},
     )

@@ -70,6 +70,12 @@ def password_auth(route_func: Callable) -> Callable:
         cookie = request.cookies.get(config.AUTH_COOKIE_NAME)
         client_host = request.client.host
 
+        # Load user activity cache
+        past_activity_cache = SimpleCache(
+            sanitize_for_filename(request.client.host) + '_auth_activity',
+            max_age_s=config.AUTH_MAX_LOGIN_ATTEMPTS_TIMEOUT_S,
+        )
+
         if cookie and is_cookie_valid(cookie, client_host):
             # The user has already logged, in forward onto the route
             log.debug(f'host {request.client.host} authenticated using a valid auth cookie.')
@@ -84,6 +90,7 @@ def password_auth(route_func: Callable) -> Callable:
             form = await request.form()
             if form.get('password') == config.SECRETS['UI_PASSWORD']:
                 # It's a successful login attempt
+                past_activity_cache.clear()
                 log.debug(f'host {request.client.host} succesfully logged in.')
                 response = RedirectResponse(request.url.path, status_code=303)
                 response.set_cookie(
@@ -99,10 +106,6 @@ def password_auth(route_func: Callable) -> Callable:
                 # It's a failed login attempt
 
                 # Check login retries
-                past_activity_cache = SimpleCache(
-                    sanitize_for_filename(request.client.host) + '_auth_activity',
-                    max_age_s=config.AUTH_MAX_LOGIN_ATTEMPTS_TIMEOUT_S,
-                )
                 past_auth_activity = past_activity_cache.read()
 
                 if past_auth_activity is None:

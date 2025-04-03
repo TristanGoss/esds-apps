@@ -1,25 +1,31 @@
 import asyncio
+import base64
 import json
 import logging
 import os
 import smtplib
 from email.message import EmailMessage
+from math import floor
 from smtplib import SMTPResponseException
 from time import sleep
 from typing import List
 
 import cairosvg
 import segno
+from fastapi import Request
 from lxml import etree
+from weasyprint import HTML
 
 from esds_apps import config
-from esds_apps.classes import MembershipCard
+from esds_apps.classes import MembershipCard, PrintablePdfError
 from esds_apps.dancecloud_interface import fetch_membership_cards
 
 log = logging.getLogger(__name__)
 
+MM_TO_A4_SCREEN_PX = 3.77953  # correct conversion for compositing svgs within an A4 html page
 
-def generate_card_face_png(card: MembershipCard) -> bytes:
+
+def generate_card_face_png(card: MembershipCard) -> str:
     # load the static svg template
     # TODO: Replace with Melinda's work and update the positioning & fonts
     with open(config.PUBLIC_DIR / 'membership_card_background.svg', 'rb') as f:
@@ -68,7 +74,6 @@ def generate_card_face_png(card: MembershipCard) -> bytes:
     text = etree.SubElement(combined_svg, 'text', {'x': '20', 'y': '30', 'fill': 'black', 'font-size': '0.2mm'})
     text.text = 'EXP: ' + card.expires_at.strftime('%d/%m/%Y')
 
-    # bake to png and return
     return cairosvg.svg2png(
         bytestring=etree.tostring(combined_svg, pretty_print=True, xml_declaration=True, encoding='UTF-8'),
         dpi=config.CARD_DPI,
@@ -158,3 +163,68 @@ def send_emails(emails: List[EmailMessage]) -> List[bool]:
             sleep(config.MAIL_SEND_INTERVAL_S)
 
     return was_email_succesfully_delivered
+
+
+def printable_pdf(  # noqa: PLR0913
+    request: Request,
+    card_uuids: List[str],
+    card_width_mm: float,
+    card_height_mm: float,
+    margin_top_mm: float,
+    margin_left_mm: float,
+    horizontal_gap_mm: float,
+    vertical_gap_mm: float,
+) -> bytes:
+    """Create a printable pdf containing the card faces."""
+    # Convert mm to px for layout
+    card_width_px = card_width_mm * config.A4_SCREEN_PX_PER_MM
+    card_height_px = card_height_mm * config.A4_SCREEN_PX_PER_MM
+    margin_top_px = margin_top_mm * config.A4_SCREEN_PX_PER_MM
+    margin_left_px = margin_left_mm * config.A4_SCREEN_PX_PER_MM
+    horizontal_gap_px = horizontal_gap_mm * config.A4_SCREEN_PX_PER_MM
+    vertical_gap_px = vertical_gap_mm * config.A4_SCREEN_PX_PER_MM
+
+    # Calculate how many cards fit per page
+    usable_w = (config.A4_WIDTH_MM * config.A4_SCREEN_PX_PER_MM) - margin_left_px
+    usable_h = (config.A4_HEIGHT_MM * config.A4_SCREEN_PX_PER_MM) - margin_top_px
+
+    cards_per_row = floor((usable_w + horizontal_gap_px) / (card_width_px + horizontal_gap_px))
+    cards_per_col = floor((usable_h + vertical_gap_px) / (card_height_px + vertical_gap_px))
+    cards_per_page = cards_per_row * cards_per_col
+    log.debug(
+        f'Each A4 page will contain {cards_per_row} rows and {cards_per_col} columns '
+        f'for a total of {cards_per_page} cards per page.'
+    )
+
+    if cards_per_page == 0:
+        raise PrintablePdfError(
+            'Your layout settings are too large — no cards would fit on an A4 page. '
+            'Please reduce card size, margins, or gaps.'
+        )
+
+    # Generate card face pngs
+    card_pngs = [
+        base64.b64encode(generate_card_face_png(card)).decode('UTF-8')
+        for card in fetch_membership_cards()
+        if card.card_uuid in card_uuids
+    ]
+
+    # Group pngs into pages
+    pages = [card_pngs[i : i + cards_per_page] for i in range(0, len(card_pngs), cards_per_page)]
+
+    log.debug(f'The generated pdf will contain {len(pages)} pages')
+
+    # Create and return PDF
+    context = {
+        'request': request,
+        'card_width_px': card_width_px,
+        'card_height_px': card_height_px,
+        'margin_top_px': margin_top_px,
+        'margin_left_px': margin_left_px,
+        'horizontal_gap_px': horizontal_gap_px,
+        'vertical_gap_px': vertical_gap_px,
+        'pages': pages,
+    }
+
+    html_string = config.TEMPLATES.get_template('pdf_card_sheet.html').render(context)
+    return HTML(string=html_string).write_pdf()
