@@ -86,3 +86,20 @@ input[type="checkbox"] {
 .print-layout-form-row input {
     width: 100px;
 }
+
+.action-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+}
+
+.action-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+}
+
+.action-button,
+.action-select {
+    flex: 1;
+}

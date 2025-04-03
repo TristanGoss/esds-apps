@@ -39,14 +39,31 @@
                     <td>{{ card.email }}</td>
                     <td>{{ card.status.value }}</td>
                     <td>{{ card.expires_at.strftime("%d-%m-%Y") }}</td>
-                    <td>
-                        <select id="reason-{{ card.card_uuid }}" onchange="updateReissueButton('{{ card.card_uuid }}')">
-                            <option value="" disabled selected>Reason</option>
-                            <option value="stolen">Stolen</option>
-                            <option value="lost">Lost</option>
-                            <option value="damaged">Damaged</option>
-                        </select>
-                        <button type="button"  id="reissue-btn-{{ card.card_uuid }}" onclick="submitReissue('{{ card.card_uuid }}', '{{ card.first_name }}')" disabled>Reissue</button>
+                    <td class="action-cell">
+                        <div class="action-group">
+                            <button type="button"
+                                    onclick="showImageModal('{{ card.card_number }}')"
+                                    class="action-button">
+                                View Front
+                            </button>
+                        </div>
+                        <div class="action-group">
+                            <button type="button"
+                                    id="reissue-btn-{{ card.card_uuid }}"
+                                    onclick="submitReissue('{{ card.card_uuid }}', '{{ card.first_name }}')"
+                                    class="action-button"
+                                    disabled>
+                                Reissue
+                            </button>
+                            <select id="reason-{{ card.card_uuid }}"
+                                    onchange="updateReissueButton('{{ card.card_uuid }}')"
+                                    class="action-select">
+                                <option value="" disabled selected>Reason</option>
+                                <option value="stolen">Stolen</option>
+                                <option value="lost">Lost</option>
+                                <option value="damaged">Damaged</option>
+                            </select>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
@@ -55,7 +72,7 @@
     </form>
     <div id="printModal" class="modal">
         <div class="modal-content">
-            <span class="close" id="modalClose">&times;</span>
+            <span class="close" id="printModalClose">&times;</span>
             <h2>Print Layout Settings</h2>
             <p>
                 Please specify the margins for the A4 print layout for the selected cards.
@@ -88,6 +105,14 @@
                 </div>
             </form>
             <button type="submit" form="layout-form">Generate PDF</button>
+        </div>
+    </div>
+    <div id="cardFrontModal" class="modal">
+        <div class="modal-content">
+            <span class="close" id="cardFrontModalClose">&times;</span>
+            <h2>Card Front</h2>
+            <p id="cardFrontModalloadingMessage" style="color: grey;">Loading...</p>
+            <img id="cardFrontImage" src="" alt="Card Front" style="max-width: 100%; max-height: 500px;">
         </div>
     </div>
     <script src="{{ url_for('public', path='js/membership_cards.js') }}"></script>

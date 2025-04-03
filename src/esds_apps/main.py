@@ -1,19 +1,20 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from http import HTTPStatus
 from io import BytesIO
 from typing import List
 
-from fastapi import Depends, FastAPI, Form, Request
+from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from esds_apps import config
 from esds_apps.auth import password_auth, require_valid_cookie
 from esds_apps.classes import MembershipCardStatus, PrintablePdfError
 from esds_apps.dancecloud_interface import fetch_membership_cards, reissue_membership_card
-from esds_apps.membership_cards import auto_issue_unissued_cards, printable_pdf
+from esds_apps.membership_cards import auto_issue_unissued_cards, generate_card_front_png, printable_pdf
 
 logging.basicConfig(
     level=config.LOGGING_LEVEL,
@@ -75,8 +76,21 @@ async def reissue_card(
     return RedirectResponse(url='/membership_cards', status_code=303)
 
 
+@app.get('/membership-cards/{card_number}/card-front.png', response_class=Response)
+async def fetch_card_front(request: Request, card_number: int, _: None = Depends(require_valid_cookie)):
+    # Remember this route alone uses the card_number because I don't think I can filter on card UUID!
+    this_card = fetch_membership_cards({'filter[number]': card_number})
+    if len(this_card) != 1:
+        raise HTTPException(
+            HTTPStatus.BAD_REQUEST,
+            f'which looking for card number {card_number}, found {len(this_card)} card(s), but expected exactly one.',
+        )
+
+    return Response(content=generate_card_front_png(this_card[0]), media_type='image/png')
+
+
 @app.post('/membership-cards/print-layout/pdf', response_class=StreamingResponse)
-def download_selected_cards(  # noqa: PLR0913
+async def download_selected_cards(  # noqa: PLR0913
     request: Request,
     card_width_mm: float = Form(...),
     card_height_mm: float = Form(...),
@@ -98,6 +112,7 @@ def download_selected_cards(  # noqa: PLR0913
             vertical_gap_mm=vertical_gap_mm,
             card_uuids=card_uuids,
         )
+        log.debug(f'Created a printable pdf for {len(card_uuids)} cards.')
 
     except PrintablePdfError as e:
         return config.TEMPLATES.TemplateResponse(request, 'pdf_card_error.html', {'message': str(e)}, status_code=400)

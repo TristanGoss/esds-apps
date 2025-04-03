@@ -1,19 +1,53 @@
+const cardFrontModal = document.getElementById("cardFrontModal");
+const cardFrontModalClose = document.getElementById("cardFrontModalClose");
+const cardFrontModalloadingMessage = document.getElementById("cardFrontModalloadingMessage");
+const cardFrontImage = document.getElementById("cardFrontImage");
+
+const printModal = document.getElementById("printModal");
+const printModalClose = document.getElementById("printModalClose");
+
+// show Card Front modal
+function showImageModal(cardNumber) {
+    // Reset state
+    cardFrontImage.style.display = "none";
+    cardFrontModalloadingMessage.style.display = "block";
+    cardFrontImage.src = `/membership-cards/${encodeURIComponent(cardNumber)}/card-front.png`;
+    cardFrontModal.style.display = "block";
+}
+
+// Hide loading message and show image once card front available.
+cardFrontImage.addEventListener("load", function () {
+    cardFrontModalloadingMessage.style.display = "none";
+    cardFrontImage.style.display = "block";
+});
+
+// Close card front modal.
+cardFrontModalClose.addEventListener("click", function () {
+    cardFrontModal.style.display = "none";
+    cardFrontModalloadingMessage.style.display = "block";
+    cardFrontImage.src = ""; // Reset image to avoid stale loads
+});
+
 // PDF download button triggers print layout modal.
 document.getElementById("download-pdf-btn").addEventListener("click", function () {
-    document.getElementById("printModal").style.display = "block";
+    printModal.style.display = "block";
     addSelectedCardsToForm();
 });
 
 // Close print layout modal.
-document.getElementById("modalClose").addEventListener("click", function () {
-    document.getElementById("printModal").style.display = "none";
+printModalClose.addEventListener("click", function () {
+    printModal.style.display = "none";
 });
 
-// Close print layout modal if the user clicks outside of it.
+// Close modals if the user clicks outside of them.
 window.onclick = function(event) {
-    const modal = document.getElementById("printModal");
-    if (event.target === modal) {
-        modal.style.display = "none";
+    if (event.target === printModal) {
+        printModal.style.display = "none";
+    }
+    if (event.target === cardFrontModal) {
+        cardFrontModal.style.display = "none";
+        cardFrontModalloadingMessage.style.display = "block";
+        cardFrontImage.src = ""; // Reset image to avoid stale loads
     }
 };
 
