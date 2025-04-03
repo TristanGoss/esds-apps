@@ -33,5 +33,4 @@ ENV PYTHONPATH=/app/src
 
 RUN poetry install
 
-# We need proxy-headers so Uvicorn can tell it's being served over https.
-CMD ["poetry", "run", "uvicorn", "esds_apps.main:app", "--host", "0.0.0.0", "--port", "8080", "--proxy-headers"]
+CMD ["poetry", "run", "uvicorn", "esds_apps.main:app", "--host", "0.0.0.0", "--port", "8080"]

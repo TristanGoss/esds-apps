@@ -9,7 +9,6 @@ from fastapi import Depends, FastAPI, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from esds_apps import config
 from esds_apps.auth import password_auth, require_valid_cookie
@@ -41,10 +40,6 @@ async def lifespan_manager(_: FastAPI):
 
 app = FastAPI(lifespan=lifespan_manager)
 app.mount('/public', StaticFiles(directory=config.PUBLIC_DIR), name='public')
-
-# ProxyHeadersMiddleware is needed to enable url_for() to generate https URLs (rather than http).
-# Without this, the browser ignores css etc.
-app.add_middleware(ProxyHeadersMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
