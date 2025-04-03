@@ -8,7 +8,7 @@ from email.message import EmailMessage
 from math import floor
 from smtplib import SMTPResponseException
 from time import sleep
-from typing import List
+from typing import List, Optional
 
 import cairosvg
 import segno
@@ -22,14 +22,20 @@ from esds_apps.dancecloud_interface import fetch_membership_cards
 
 log = logging.getLogger(__name__)
 
-MM_TO_A4_SCREEN_PX = 3.77953  # correct conversion for compositing svgs within an A4 html page
+
+def credit_card_svg() -> str:
+    # Create the root SVG container
+    svg = etree.Element('svg', nsmap={None: config.SVG_NAMESPACE})
+
+    # Set basic properties
+    svg.set('width', f'{config.CARD_LAYOUT_WIDTH_MM}mm')
+    svg.set('height', f'{config.CARD_LAYOUT_HEIGHT_MM}mm')
+    svg.set('viewBox', f'0 0 {config.CARD_LAYOUT_WIDTH_MM} {config.CARD_LAYOUT_HEIGHT_MM}')
+    return svg
 
 
-def generate_card_face_png(card: MembershipCard) -> str:
-    # load the static svg template
-    # TODO: Replace with Melinda's work and update the positioning & fonts
-    with open(config.PUBLIC_DIR / 'membership_card_background.svg', 'rb') as f:
-        background = etree.parse(f)
+def generate_card_front_png(card: MembershipCard) -> bytes:
+    combined_svg = credit_card_svg()
 
     # fetch own QR code
     # TODO: Dancecloud apparently hasn't implemented the below route yet.
@@ -39,40 +45,50 @@ def generate_card_face_png(card: MembershipCard) -> str:
     # let's do it ourselves for now, since we know what the url will be
     qr_svg = segno.make(f'{config.DC_SERVER}/members/cards/{card.card_uuid}/check', error='m').svg_inline()
 
-    # Define SVG namespace
-    SVG_NS = 'http://www.w3.org/2000/svg'
-    NSMAP = {None: SVG_NS}
-
-    # Create the root SVG container
-    combined_svg = etree.Element('svg', nsmap=NSMAP)
-    # Define svg as ISO/IEC 7810 ID-1 card, working in millimeters
-    combined_svg.set('width', '85.6mm')
-    combined_svg.set('height', '53.98mm')
-    combined_svg.set('viewBox', '0 0 85.6 53.98')
+    # load the static svg template
+    # TODO: Replace with Melinda's work and update the positioning & fonts
+    with open(config.PUBLIC_DIR / 'membership_card_front.svg', 'rb') as f:
+        background = etree.parse(f)
 
     # Add the background
-    g1 = etree.SubElement(combined_svg, 'g', transform='translate(0, 0), scale(0.033)')
+    g1 = etree.SubElement(combined_svg, 'g', transform=config.CARD_LAYOUT_FRONT_TRANSFORM)
     for el in background.getroot():
         g1.append(el)
 
     # Add the QR code
-    combined_svg.append(etree.fromstring(f'<g transform="translate(55, 10), scale(0.5)">{qr_svg}</g>'))
+    combined_svg.append(etree.fromstring(f'<g transform="{config.CARD_LAYOUT_QR_TRANSFORM}">{qr_svg}</g>'))
 
     # Add name
-    text = etree.SubElement(combined_svg, 'text', {'x': '20', 'y': '10', 'fill': 'black', 'font-size': '0.2mm'})
+    text = etree.SubElement(combined_svg, 'text', config.CARD_LAYOUT_NAME_PARAMS)
     text.text = card.first_name + ' ' + card.last_name
 
     # Add membership card number
-    text = etree.SubElement(
-        combined_svg,
-        'text',
-        {'x': '10', 'y': '20', 'fill': 'black', 'font-size': '0.2mm', 'transform': 'rotate(-90 10 20)'},
-    )
-    text.text = f'M: {card.card_number:06}'
+    text = etree.SubElement(combined_svg, 'text', config.CARD_LAYOUT_CARD_NUMBER_PARAMS)
+    text.text = f'C: {card.card_number:06}'
 
     # Add expiry date
-    text = etree.SubElement(combined_svg, 'text', {'x': '20', 'y': '30', 'fill': 'black', 'font-size': '0.2mm'})
+    text = etree.SubElement(combined_svg, 'text', config.CARD_LAYOUT_EXPIRY_DATE_PARAMS)
     text.text = 'EXP: ' + card.expires_at.strftime('%d/%m/%Y')
+
+    return cairosvg.svg2png(
+        bytestring=etree.tostring(combined_svg, pretty_print=True, xml_declaration=True, encoding='UTF-8'),
+        dpi=config.CARD_DPI,
+        background_color='white',
+    )
+
+
+def generate_card_back_png() -> bytes:
+    combined_svg = credit_card_svg()
+
+    # load the static svg template
+    # TODO: Replace with Melinda's updated work
+    with open(config.PUBLIC_DIR / 'membership_card_back.svg', 'rb') as f:
+        background = etree.parse(f)
+
+    # Add the background
+    g1 = etree.SubElement(combined_svg, 'g', transform=config.CARD_LAYOUT_BACK_TRANSFORM)
+    for el in background.getroot():
+        g1.append(el)
 
     return cairosvg.svg2png(
         bytestring=etree.tostring(combined_svg, pretty_print=True, xml_declaration=True, encoding='UTF-8'),
@@ -124,7 +140,7 @@ def compose_membership_email(card: MembershipCard) -> EmailMessage:
     )
     msg_html_part = msg.get_payload()[-1]
 
-    qr_code_png = generate_card_face_png(card)
+    qr_code_png = generate_card_front_png(card)
 
     # Attach card face inline using Content-ID.
     msg_html_part.add_related(qr_code_png, maintype='image', subtype='png', cid='membership_card_cid')
@@ -165,6 +181,25 @@ def send_emails(emails: List[EmailMessage]) -> List[bool]:
     return was_email_succesfully_delivered
 
 
+def mirror_page(page: list[str], cards_per_row: int, cards_per_page: int) -> List[Optional[str]]:
+    """Return a page of base64 encoded card pngs, but flipped along the long axis.
+
+    This, together with a css adjustment in the printing template,
+    allows us to correctly position the card backs with respect to the card fronts.
+    """
+    # Pad with None
+    padded = page + [None] * (cards_per_page - len(page))
+
+    # Group into rows
+    rows = [padded[i : i + cards_per_row] for i in range(0, cards_per_page, cards_per_row)]
+
+    # Mirror each row
+    mirrored = [list(reversed(row)) for row in rows]
+
+    # Flatten and return
+    return [img for row in mirrored for img in row]
+
+
 def printable_pdf(  # noqa: PLR0913
     request: Request,
     card_uuids: List[str],
@@ -202,17 +237,39 @@ def printable_pdf(  # noqa: PLR0913
             'Please reduce card size, margins, or gaps.'
         )
 
-    # Generate card face pngs
-    card_pngs = [
-        base64.b64encode(generate_card_face_png(card)).decode('UTF-8')
+    # Generate card front pngs
+    card_front_pngs = [
+        base64.b64encode(generate_card_front_png(card)).decode('UTF-8')
         for card in fetch_membership_cards()
         if card.card_uuid in card_uuids
     ]
 
     # Group pngs into pages
-    pages = [card_pngs[i : i + cards_per_page] for i in range(0, len(card_pngs), cards_per_page)]
+    front_pages = [card_front_pngs[i : i + cards_per_page] for i in range(0, len(card_front_pngs), cards_per_page)]
 
-    log.debug(f'The generated pdf will contain {len(pages)} pages')
+    # Add in card back pngs
+    card_back_png = base64.b64encode(generate_card_back_png()).decode('UTF-8')
+
+    interleaved_pages = []
+    for page in front_pages:
+        # Pad front page to full grid
+        padded_front = page + [None] * (cards_per_page - len(page))
+        interleaved_pages.append({'side': 'front', 'images': padded_front})
+
+        # Insert mirrored back page
+        mirrored_back = mirror_page(
+            [card_back_png if img is not None else None for img in padded_front],
+            cards_per_row=cards_per_row,
+            cards_per_page=cards_per_page,
+        )
+        interleaved_pages.append({'side': 'back', 'images': mirrored_back})
+
+    log.debug(f'The generated pdf will contain {len(interleaved_pages)} pages')
+
+    # Calculate left margin for mirrored page
+    grid_width_px = cards_per_row * card_width_px + (cards_per_row - 1) * horizontal_gap_px
+    page_width_px = config.A4_WIDTH_MM * config.A4_SCREEN_PX_PER_MM
+    mirrored_margin_left_px = page_width_px - (grid_width_px + margin_left_px)
 
     # Create and return PDF
     context = {
@@ -223,7 +280,8 @@ def printable_pdf(  # noqa: PLR0913
         'margin_left_px': margin_left_px,
         'horizontal_gap_px': horizontal_gap_px,
         'vertical_gap_px': vertical_gap_px,
-        'pages': pages,
+        'mirrored_margin_left_px': mirrored_margin_left_px,
+        'pages': interleaved_pages,
     }
 
     html_string = config.TEMPLATES.get_template('pdf_card_sheet.html').render(context)

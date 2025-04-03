@@ -11,7 +11,8 @@ RUN apt-get update && apt-get install -y \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
     libgdk-pixbuf2.0-0 \
-    fonts-dejavu-core
+    fonts-dejavu-core \
+    fontconfig
 
 # Install python dependencies only as a separate layer (for speed in rebuilding)
 RUN poetry install --no-root
@@ -20,6 +21,9 @@ COPY ./README.md /app/README.md
 COPY ./src /app/src
 COPY ./public /app/public
 COPY ./templates /app/templates
+COPY ./fonts/futura /usr/local/share/fonts
+# Rebuild font cache to include provided fonts
+RUN fc-cache -f -v
 
 # Remember this file is not present in the repo, you need to add it manually!
 # It contains the secrets that are not stored in the repository

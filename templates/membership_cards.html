@@ -59,31 +59,32 @@
             <h2>Print Layout Settings</h2>
             <p>
                 Please specify the margins for the A4 print layout for the selected cards.
+                Odd-numbered pages will contain card fronts, even-numbered pages will contain card backs.
             </p>
             <form id="layout-form" method="POST" action="/membership-cards/print-layout/pdf">
                 <div class="print-layout-form-row">
                     <label for="card-width">Card Width (mm):</label>
-                    <input id="card-width" type="number" name="card_width_mm" value="85.6" required>
+                    <input id="card-width" type="number" name="card_width_mm" value="85.6" step="any" required>
                 </div>
                 <div class="print-layout-form-row">
                     <label for="card-height">Card Height (mm):</label>
-                    <input id="card-height" type="number" name="card_height_mm" value="54" required>
+                    <input id="card-height" type="number" name="card_height_mm" value="54" step="any" required>
                 </div>
                 <div class="print-layout-form-row">
                     <label for="margin-top">Top Margin (mm):</label>
-                    <input id="margin-top" type="number" name="margin_top_mm" value="3.5" required>
+                    <input id="margin-top" type="number" name="margin_top_mm" value="3.5" step="any" required>
                 </div>
                 <div class="print-layout-form-row">
                     <label for="margin-left">Left Margin (mm):</label>
-                    <input id="margin-left" type="number" name="margin_left_mm" value="16.9" required>
+                    <input id="margin-left" type="number" name="margin_left_mm" value="16.9" step="any" required>
                 </div>
                 <div class="print-layout-form-row">
                     <label for="horizontal-gap">Horizontal Gap (mm):</label>
-                    <input id="horizontal-gap" type="number" name="horizontal_gap_mm" value="5" required>
+                    <input id="horizontal-gap" type="number" name="horizontal_gap_mm" value="5" step="any" required>
                 </div>
                 <div class="print-layout-form-row">
                     <label for="vertical-gap">Vertical Gap (mm):</label>
-                    <input id="vertical-gap" type="number" name="vertical_gap_mm" value="5" required>
+                    <input id="vertical-gap" type="number" name="vertical_gap_mm" value="5" step="any" required>
                 </div>
             </form>
             <button type="submit" form="layout-form">Generate PDF</button>
