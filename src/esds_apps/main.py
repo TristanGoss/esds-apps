@@ -61,14 +61,16 @@ async def landing_page(request: Request):
 @app.api_route('/membership-cards', methods=['GET', 'POST'], response_class=HTMLResponse)
 @password_auth
 async def membership_cards(request: Request):
-    return config.TEMPLATES.TemplateResponse(request, 'membership_cards.html', {'cards': fetch_membership_cards()})
+    return config.TEMPLATES.TemplateResponse(
+        request, 'membership_cards.html', {'cards': await fetch_membership_cards()}
+    )
 
 
 @app.post('/membership-cards/{card_uuid}/reissue', response_class=RedirectResponse)
 async def reissue_card(
     request: Request, card_uuid: str, reason: MembershipCardStatus = Form(...), _: None = Depends(require_valid_cookie)
 ):
-    reissue_membership_card(card_uuid, reason)
+    await reissue_membership_card(card_uuid, reason)
     log.info(f'Reissued card with UUID {card_uuid} because it was {reason}')
 
     # Redirect back to the table view
@@ -78,7 +80,7 @@ async def reissue_card(
 @app.get('/membership-cards/{card_number}/card-front.png', response_class=Response)
 async def fetch_card_front(request: Request, card_number: int, _: None = Depends(require_valid_cookie)):
     # Remember this route alone uses the card_number because I don't think I can filter on card UUID!
-    this_card = fetch_membership_cards({'filter[number]': card_number})
+    this_card = await fetch_membership_cards({'filter[number]': card_number})
     if len(this_card) != 1:
         raise HTTPException(
             HTTPStatus.BAD_REQUEST,
@@ -101,7 +103,7 @@ async def download_selected_cards(  # noqa: PLR0913
     _: None = Depends(require_valid_cookie),
 ):
     try:
-        pdf_bytes = printable_pdf(
+        pdf_bytes = await printable_pdf(
             request=request,
             card_width_mm=card_width_mm,
             card_height_mm=card_height_mm,

@@ -39,8 +39,9 @@ def generate_card_front_png(card: MembershipCard) -> bytes:
 
     # fetch own QR code
     # TODO: Dancecloud apparently hasn't implemented the below route yet.
-    # response = requests.get(f"{config.DC_SERVER}/members/cards/{self.card_uuid}/qr-code.svg")
-    # response.raise_for_status()
+    # with httpx.AsyncClient() as client:
+    #     response = await client.get(f"{config.DC_SERVER}/members/cards/{self.card_uuid}/qr-code.svg")
+    #     response.raise_for_status()
     #     qr_code = etree.parse(response.text)
     # let's do it ourselves for now, since we know what the url will be
     qr_svg = segno.make(f'{config.DC_SERVER}/members/cards/{card.card_uuid}/check', error='m').svg_inline()
@@ -102,7 +103,7 @@ async def auto_issue_unissued_cards():
     while True:
         await asyncio.sleep(config.DC_POLL_INTERVAL_S)
         log.info('Dancecloud unissued cards poller awoken.')
-        new_cards = fetch_membership_cards({'filter[status]': 'new'})
+        new_cards = await fetch_membership_cards({'filter[status]': 'new'})
         log.info(f'found {len(new_cards)} new cards to issue.')
 
         # TODO: The "add to Google/Apple wallet" option is non-trivial,
@@ -202,7 +203,7 @@ def mirror_page(page: list[str], cards_per_row: int, cards_per_page: int) -> Lis
     return [img for row in mirrored for img in row]
 
 
-def printable_pdf(  # noqa: PLR0913
+async def printable_pdf(  # noqa: PLR0913
     request: Request,
     card_uuids: List[str],
     card_width_mm: float,
@@ -242,7 +243,7 @@ def printable_pdf(  # noqa: PLR0913
     # Generate card front pngs
     card_front_pngs = [
         base64.b64encode(generate_card_front_png(card)).decode('UTF-8')
-        for card in fetch_membership_cards()
+        for card in await fetch_membership_cards()
         if card.card_uuid in card_uuids
     ]
 
