@@ -56,6 +56,7 @@ DC_SERVER = 'https://esds-test.dancecloud.xyz'
 DC_POLL_INTERVAL_S = 86400
 DC_GET_HEADERS = {'Authorization': f'Bearer {SECRETS["DC_API_TOKEN"]}', 'Accept': 'application/vnd.api+json'}
 DC_PATCH_HEADERS = DC_GET_HEADERS.copy().update({'Content-Type': 'application/vnd.api+json'})
+DC_POST_HEADERS = DC_GET_HEADERS.copy().update({'Content-Type': 'application/json'})
 
 MAIL_NO_HTML_FALLBACK_MESSAGE = """
 Welcome to Edinburgh Swing Dance Society!

@@ -52,7 +52,7 @@ def set_membership_card_status(card_uuid: str, status: MembershipCardStatus) -> 
     response = requests.patch(
         f'{config.DC_SERVER}/{config.DC_API_PATH}/membership-cards/{card_uuid}',
         headers=config.DC_PATCH_HEADERS,
-        data={'data': {'type': 'membership-cards', 'id': card_uuid, 'attributes': {'status': str(status)}}},
+        json={'data': {'type': 'membership-cards', 'id': card_uuid, 'attributes': {'status': str(status)}}},
     )
     response.raise_for_status()
 
@@ -65,8 +65,8 @@ def reissue_membership_card(card_uuid: str, reason: MembershipCardStatus) -> Non
     )
     response = requests.post(
         f'{config.DC_SERVER}/{config.DC_API_PATH}/membership-cards/{card_uuid}/-actions/reissue',
-        headers=config.DC_PATCH_HEADERS,
-        data={'action': {'status': str(reason)}},
+        headers=config.DC_POST_HEADERS,
+        json={'action': {'status': str(reason)}},
     )
     response.raise_for_status()
     # TODO: Note that as of 1710 1st April, this 404s.
