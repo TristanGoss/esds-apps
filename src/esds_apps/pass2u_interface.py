@@ -20,12 +20,18 @@ async def create_wallet_pass(card: MembershipCard) -> str:
     Returns the passId.
     The page where the user can obtain the pass is https://www.pass2u.net/d/{passId}
     """
+    # localise card expiry date if necessary, as the API spec requires a localised expiration date
+    if card.expires_at.tzinfo is None:
+        localised_expires_at = pytz.timezone('Europe/London').localize(card.expires_at)
+    else:
+        localised_expires_at = card.expires_at.astimezone(pytz.timezone('Europe/London'))
+
     # start by creating a new card within Pass2U
     async with httpx.AsyncClient() as client:
         response = client.post(
             f'{config.PASS2U_HOST}/{config.PASS2U_API_PATH}/models/{config.PASS2U_MODEL_ID}/passes',
             json={
-                'expirationDate': pytz.timezone('Europe/London').localize(card.expires_at).isoformat(),
+                'expirationDate': localised_expires_at.isoformat(),
                 'barcode': {'message': card.check_url, 'altText': 'QR code'},
                 'fields': [
                     {'key': 'name', 'value': card.first_name + ' ' + card.last_name},
