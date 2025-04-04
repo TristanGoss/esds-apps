@@ -135,7 +135,7 @@ async def create_and_or_return_wallet_pass_link(request: Request, card_uuid: str
     else:
         # we need to create a new wallet pass (this costs money,
         # which is why we only do it when people click on the link in the email)
-        pass_id = create_wallet_pass(this_card)
+        pass_id = await create_wallet_pass(this_card)
         log.debug(f'created a new wallet pass with id {pass_id} for card number {this_card.card_number}')
 
     # redirect the user to the pass2u page.
