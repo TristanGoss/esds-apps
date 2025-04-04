@@ -67,7 +67,7 @@ async def void_wallet_pass(card: MembershipCard) -> None:
     card_number = card.card_number  # we only pass the whole card in for consistency
     current_cache_content = MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE.read()
     if current_cache_content:
-        pass_id_to_void = current_cache_content[card_number]
+        pass_id_to_void = current_cache_content[str(card_number)]
         log.debug(f'about to void wallet pass for card number {card_number}, wallet pass Id {pass_id_to_void}')
 
         with httpx.Client() as client:
@@ -93,6 +93,6 @@ async def void_wallet_pass(card: MembershipCard) -> None:
         )
 
     # remove voided wallet pass from cache
-    del current_cache_content[card_number]
+    del current_cache_content[str(card_number)]
     MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE.clear()
     MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE.write(current_cache_content)

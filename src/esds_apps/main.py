@@ -126,10 +126,11 @@ async def create_and_or_return_wallet_pass_link(request: Request, card_uuid: str
     this_card = matching_cards[0]
 
     # check whether the card number already has an associated wallet pass id
+    # remember that because the cache is JSON, the keys will always be strings.
     cache_content = MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE.read()
-    if (cache_content is not None) and (this_card.card_number in cache_content):
+    if (cache_content is not None) and (str(this_card.card_number) in cache_content):
         # we can generate and return the link directly - no need to create a new wallet pass.
-        pass_id = cache_content[this_card.card_number]
+        pass_id = cache_content[str(this_card.card_number)]
         log.debug('found existing wallet pass id {} for card number {}, so returning that instead of creating one')
 
     else:
