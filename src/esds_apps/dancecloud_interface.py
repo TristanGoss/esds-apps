@@ -16,12 +16,13 @@ async def fetch_membership_cards(additional_params: Optional[Dict] = None) -> Li
     params = {'page[size]': 9999, 'include': 'member'}
     if additional_params is not None:
         params.update(additional_params)
-        with httpx.AsyncClient() as client:
-            response = await client.get(
-                f'{config.DC_HOST}/{config.DC_API_PATH}/membership-cards',
-                headers=config.DC_GET_HEADERS,
-                params=params,
-            )
+
+    with httpx.AsyncClient() as client:
+        response = await client.get(
+            f'{config.DC_HOST}/{config.DC_API_PATH}/membership-cards',
+            headers=config.DC_GET_HEADERS,
+            params=params,
+        )
     response.raise_for_status()
 
     # parse the output to extract the bits we care about
