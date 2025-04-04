@@ -27,23 +27,23 @@ CARD_DPI = 300
 # Define layout as ISO/IEC 7810 ID-1 card
 CARD_LAYOUT_WIDTH_MM = 85.6
 CARD_LAYOUT_HEIGHT_MM = 53.98
-CARD_LAYOUT_FRONT_TRANSFORM = 'translate(0, 0), scale(0.345)'
-CARD_LAYOUT_BACK_TRANSFORM = 'translate(0, 0), scale(0.345)'
+CARD_LAYOUT_FRONT_TRANSFORM = 'translate(0, 0), scale(1.0)'  # leave these in as no-ops for now
+CARD_LAYOUT_BACK_TRANSFORM = 'translate(0, 0), scale(1.0)'  # leave these in as no-ops for now
 CARD_LAYOUT_QR_TRANSFORM = 'translate(5.58, 7.45), scale(0.7)'
-CARD_LAYOUT_NAME_PARAMS = {'x': '4', 'y': '48.5', 'fill': '#00479E', 'font-size': '0.6mm', 'font-family': 'Futura'}
+CARD_LAYOUT_NAME_PARAMS = {'x': '5', 'y': '48.5', 'fill': '#00479E', 'font-size': '0.6mm', 'font-family': 'Futura'}
 CARD_LAYOUT_CARD_NUMBER_PARAMS = {
-    'x': '7',
+    'x': '13',
     'y': '8.2',
     'fill': '#00479E',
     'font-size': '0.3mm',
     'font-family': 'Futura',
 }
 CARD_LAYOUT_EXPIRY_DATE_PARAMS = {
-    'x': '76',
+    'x': '80',
     'y': '33',
     'fill': '#00479E',
     'font-size': '0.3mm',
-    'transform': 'rotate(-90 76 33)',
+    'transform': 'rotate(-90 80 33)',
     'font-family': 'Futura',
 }
 

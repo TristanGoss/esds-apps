@@ -64,7 +64,7 @@ def generate_card_front_png(card: MembershipCard) -> bytes:
 
     # Add membership card number
     text = etree.SubElement(combined_svg, 'text', config.CARD_LAYOUT_CARD_NUMBER_PARAMS)
-    text.text = f'C: {card.card_number:06}'
+    text.text = f'#{card.card_number:06}'
 
     # Add expiry date
     text = etree.SubElement(combined_svg, 'text', config.CARD_LAYOUT_EXPIRY_DATE_PARAMS)
@@ -142,16 +142,18 @@ def compose_membership_email(card: MembershipCard) -> EmailMessage:
 
     qr_code_png = generate_card_front_png(card)
 
-    # Attach card face inline using Content-ID.
+    # Attach card face inline using Content ID.
     msg_html_part.add_related(qr_code_png, maintype='image', subtype='png', cid='membership_card_cid')
 
     # Add it as an attachment as well.
-    msg.add_attachment(qr_code_png, maintype='image', subtype='png', filename=f'membership_card_{card.card_uuid}.png')
+    msg.add_attachment(qr_code_png, maintype='image', subtype='png', filename=f'membership_card_{card.card_number}.png')
 
-    # Add the rest of the images used in the template
+    # Load the image to Content ID map
     with open(config.PUBLIC_DIR / 'new_membership_email_image_to_cid_map.json') as fh:
         image_to_cid_map = json.load(fh)
 
+    # Embed the images into the email.
+    # We do this so that reading the email does not rely on the server being up.
     for entry in image_to_cid_map:
         with open(config.PUBLIC_DIR / entry['image_path'], 'rb') as f:
             msg_html_part.add_related(
