@@ -5,6 +5,6 @@
     {"image_path": "facebook_icon.png", "cid": "facebook_icon_cid"},
     {"image_path": "instagram_icon.png", "cid": "instagram_icon_cid"},
     {"image_path": "email_background.png", "cid": "email_background_cid"},
-    {"image_path": "enUS_add_to_google_wallet_add-wallet-badge.svg.png", "cid": "add_to_google_wallet_button_cid"},
-    {"image_path": "US-UK_Add_to_Apple_Wallet_RGB_101421.svg.png", "cid": "add_to_apple_wallet_button_cid"}
+    {"image_path": "enUS_add_to_google_wallet_add-wallet-badge.png", "cid": "google_wallet_button_cid"},
+    {"image_path": "US-UK_Add_to_Apple_Wallet_RGB_101421.png", "cid": "apple_wallet_button_cid"}
 ]
