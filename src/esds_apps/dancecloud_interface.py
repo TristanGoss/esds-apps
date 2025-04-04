@@ -18,7 +18,7 @@ async def fetch_membership_cards(additional_params: Optional[Dict] = None) -> Li
         params.update(additional_params)
         with httpx.AsyncClient() as client:
             response = await client.get(
-                f'{config.DC_SERVER}/{config.DC_API_PATH}/membership-cards',
+                f'{config.DC_HOST}/{config.DC_API_PATH}/membership-cards',
                 headers=config.DC_GET_HEADERS,
                 params=params,
             )
@@ -52,7 +52,7 @@ async def fetch_membership_cards(additional_params: Optional[Dict] = None) -> Li
 async def set_membership_card_status(card_uuid: str, status: MembershipCardStatus) -> None:
     with httpx.AsyncClient() as client:
         response = await client.patch(
-            f'{config.DC_SERVER}/{config.DC_API_PATH}/membership-cards/{card_uuid}',
+            f'{config.DC_HOST}/{config.DC_API_PATH}/membership-cards/{card_uuid}',
             headers=config.DC_PATCH_HEADERS,
             json={'data': {'type': 'membership-cards', 'id': card_uuid, 'attributes': {'status': str(status)}}},
         )
@@ -67,7 +67,7 @@ async def reissue_membership_card(card_uuid: str, reason: MembershipCardStatus) 
     )
     with httpx.AsyncClient() as client:
         response = await client.post(
-            f'{config.DC_SERVER}/{config.DC_API_PATH}/membership-cards/{card_uuid}/-actions/reissue',
+            f'{config.DC_HOST}/{config.DC_API_PATH}/membership-cards/{card_uuid}/-actions/reissue',
             headers=config.DC_POST_HEADERS,
             json={'action': {'status': str(reason)}},
         )

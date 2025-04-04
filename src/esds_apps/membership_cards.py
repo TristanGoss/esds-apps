@@ -37,14 +37,8 @@ def credit_card_svg() -> str:
 def generate_card_front_png(card: MembershipCard) -> bytes:
     combined_svg = credit_card_svg()
 
-    # fetch own QR code
-    # TODO: Dancecloud apparently hasn't implemented the below route yet.
-    # with httpx.AsyncClient() as client:
-    #     response = await client.get(f"{config.DC_SERVER}/members/cards/{self.card_uuid}/qr-code.svg")
-    #     response.raise_for_status()
-    #     qr_code = etree.parse(response.text)
-    # let's do it ourselves for now, since we know what the url will be
-    qr_svg = segno.make(f'{config.DC_SERVER}/members/cards/{card.card_uuid}/check', error='m').svg_inline()
+    # create QR code
+    qr_svg = segno.make(card.check_url, error='m').svg_inline()
 
     # load the static svg template
     # TODO: Replace with Melinda's work and update the positioning & fonts
@@ -98,7 +92,7 @@ def generate_card_back_png() -> bytes:
     )
 
 
-async def auto_issue_unissued_cards():
+async def auto_issue_unissued_cards() -> None:
     log.debug('Dancecloud unissued cards poller started.')
     while True:
         await asyncio.sleep(config.DC_POLL_INTERVAL_S)
@@ -109,7 +103,7 @@ async def auto_issue_unissued_cards():
         # TODO: The "add to Google/Apple wallet" option is non-trivial,
         # since it's certified proof.
 
-        emails = [compose_membership_email(card) for card in new_cards]
+        emails = [await compose_membership_email(card) for card in new_cards]
         log.info(f'composed {len(emails)} membership emails.')
 
         # TODO: restore for committee test
@@ -122,7 +116,7 @@ async def auto_issue_unissued_cards():
         log.info('Dancecloud unissued cards poller returning to sleep.')
 
 
-def compose_membership_email(card: MembershipCard) -> EmailMessage:
+async def compose_membership_email(card: MembershipCard) -> EmailMessage:
     msg = EmailMessage()
     msg['Subject'] = 'Your ESDS Membership'
     msg['From'] = 'info@esds.org.uk'
@@ -133,9 +127,16 @@ def compose_membership_email(card: MembershipCard) -> EmailMessage:
     msg.set_content(config.MAIL_NO_HTML_FALLBACK_MESSAGE)
 
     # Add HTML version.
+    # *yes*, both wallet urls are *supposed* to be the same!
+    # They both hit the server, which then creates a new wallet pass via pass2u if one does not already exist.
+    # We only want to create these passes once someone actually clicks on the button, or we'll waste money.
     msg.add_alternative(
         config.TEMPLATES.env.get_template('new_membership_email.html').render(
-            {'first_name': card.first_name, 'last_name': card.last_name}
+            {
+                'first_name': card.first_name,
+                'apple_wallet_url': f'https://apps.esds.org.uk/membership-cards/{card.card_uuid}/wallet-pass',
+                'google_wallet_url': f'https://apps.esds.org.uk/membership-cards/{card.card_uuid}/wallet-pass',
+            }
         ),
         subtype='html',
     )

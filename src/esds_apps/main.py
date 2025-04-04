@@ -15,6 +15,7 @@ from esds_apps.auth import password_auth, require_valid_cookie
 from esds_apps.classes import MembershipCardStatus, PrintablePdfError
 from esds_apps.dancecloud_interface import fetch_membership_cards, reissue_membership_card
 from esds_apps.membership_cards import auto_issue_unissued_cards, generate_card_front_png, printable_pdf
+from esds_apps.pass2u_interface import MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE, create_wallet_pass, void_wallet_pass
 
 logging.basicConfig(
     level=config.LOGGING_LEVEL,
@@ -45,7 +46,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         'https://www.dancecloud.com',
-        config.DC_SERVER,
+        config.DC_HOST,
     ],
     allow_credentials=True,
     allow_methods=['*'],
@@ -70,6 +71,15 @@ async def membership_cards(request: Request):
 async def reissue_card(
     request: Request, card_uuid: str, reason: MembershipCardStatus = Form(...), _: None = Depends(require_valid_cookie)
 ):
+    # find the full details of the card that this UUID refers to
+    # Why do this? Because we can only filter on card number,
+    # but the dancecloud reissue route wants the card_uuid as an argument.
+    card_to_void = [card for card in await fetch_membership_cards() if card.card_uuid == card_uuid][0]
+
+    # void the associated wallet pass
+    await void_wallet_pass(card_to_void)
+
+    # reissue the card via dancecloud - this will cause the periodic check to pick it up and issue an email later on.
     await reissue_membership_card(card_uuid, reason)
     log.info(f'Reissued card with UUID {card_uuid} because it was {reason}')
 
@@ -79,15 +89,57 @@ async def reissue_card(
 
 @app.get('/membership-cards/{card_number}/card-front.png', response_class=Response)
 async def fetch_card_front(request: Request, card_number: int, _: None = Depends(require_valid_cookie)):
-    # Remember this route alone uses the card_number because I don't think I can filter on card UUID!
-    this_card = await fetch_membership_cards({'filter[number]': card_number})
-    if len(this_card) != 1:
+    # Remember this route uses the card_number because I don't think I can filter on card UUID!
+    matching_cards = await fetch_membership_cards({'filter[number]': card_number})
+    if len(matching_cards) != 1:
         raise HTTPException(
             HTTPStatus.BAD_REQUEST,
-            f'which looking for card number {card_number}, found {len(this_card)} card(s), but expected exactly one.',
+            f'when looking for card number {card_number}, '
+            f'found {len(matching_cards)} card(s), but expected exactly one.',
         )
 
-    return Response(content=generate_card_front_png(this_card[0]), media_type='image/png')
+    return Response(content=generate_card_front_png(matching_cards[0]), media_type='image/png')
+
+
+@app.get('/membership-cards/{card_uuid}/wallet-pass', response_class=RedirectResponse)
+async def create_and_or_return_wallet_pass_link(request: Request, card_uuid: str):
+    """Create a wallet pass if necessary and redirect the user to its url.
+
+    The link that we distribute in the email labelled "Add to wallet" actually hits this route.
+    This ensures that we only generate passes if the user actually clicks on the link
+    AND they didn't already exist. This is important, because passes from pass2u cost money!
+
+    However, that means the general public need to be able to hit this route,
+    so it can't require a login cookie or trigger a password form.
+
+    Ideally we would provide the card number because it prevents us from having to fetch
+    every card in the membership scheme, but that number is "easy" to brute force,
+    and this route doesn't have the protection of the others, so instead we're using the card_uuid,
+    which is vastly harder to guess.
+    """
+    matching_cards = [card for card in await fetch_membership_cards() if card.card_uuid == card_uuid]
+    if len(matching_cards) != 1:
+        raise HTTPException(
+            HTTPStatus.BAD_REQUEST,
+            f'when looking for card {card_uuid}, found {len(matching_cards)} card(s), but expected exactly one.',
+        )
+    this_card = matching_cards[0]
+
+    # check whether the card number already has an associated wallet pass id
+    cache_content = MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE.read()
+    if this_card.card_number in cache_content:
+        # we can generate and return the link directly - no need to create a new wallet pass.
+        pass_id = cache_content[this_card.card_number]
+        log.debug('found existing wallet pass id {} for card number {}, so returning that instead of creating one')
+
+    else:
+        # we need to create a new wallet pass (this costs money,
+        # which is why we only do it when people click on the link in the email)
+        pass_id = create_wallet_pass(this_card)
+        log.debug(f'created a new wallet pass with id {pass_id} for card number {this_card.card_number}')
+
+    # redirect the user to the pass2u page.
+    return RedirectResponse(url=f'https://www.pass2u.net/d/{pass_id}', status_code=303)
 
 
 @app.post('/membership-cards/print-layout/pdf', response_class=StreamingResponse)

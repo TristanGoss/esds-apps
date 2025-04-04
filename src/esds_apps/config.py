@@ -9,7 +9,7 @@ LOGGING_LEVEL = logging.DEBUG
 CACHE_ROOT = '/tmp/esds_cache'
 
 SECRETS = dotenv_values('.env')
-for var_name in ['DC_API_TOKEN', 'GMAIL_APP_PASSWORD', 'UI_PASSWORD']:
+for var_name in ['DC_API_TOKEN', 'GMAIL_APP_PASSWORD', 'UI_PASSWORD', 'PASS2U_API_KEY']:
     if var_name not in SECRETS:
         raise RuntimeError(f'Environment variable {var_name} is missing from the .env file.')
 
@@ -52,7 +52,7 @@ A4_WIDTH_MM = 210
 A4_HEIGHT_MM = 297
 
 DC_API_PATH = 'api/v1'
-DC_SERVER = 'https://esds-test.dancecloud.xyz'
+DC_HOST = 'https://esds-test.dancecloud.xyz'
 DC_POLL_INTERVAL_S = 86400
 DC_GET_HEADERS = {'Authorization': f'Bearer {SECRETS["DC_API_TOKEN"]}', 'Accept': 'application/vnd.api+json'}
 DC_PATCH_HEADERS = DC_GET_HEADERS.copy().update({'Content-Type': 'application/vnd.api+json'})
@@ -70,3 +70,10 @@ to this digital one, please contact info@esds.org.uk
 to request a physical card.
 """
 MAIL_SEND_INTERVAL_S = 1
+
+# Pass2u.net is used for Apple Wallet and Google Wallet integration only
+PASS2U_MODEL_ID = 311534
+PASS2U_API_PATH = 'v2'
+PASS2U_HOST = 'https://api.pass2u.net'
+
+FOREVER_CACHE_TIMEOUT_S = 9999 * 365.25 * 24 * 60 * 60

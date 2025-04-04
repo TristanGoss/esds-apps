@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
 
+from esds_apps.config import DC_HOST
+
 
 class MembershipCardStatus(StrEnum):
     NEW = 'new'
@@ -23,6 +25,11 @@ class MembershipCard:
     last_name: str
     email: str
     status: MembershipCardStatus
+
+    @property
+    def check_url(self) -> str:
+        """URL for the QR code on the membership card."""
+        return f'{DC_HOST}/members/cards/{self.card_uuid}/check'
 
 
 class PrintablePdfError(ValueError):
