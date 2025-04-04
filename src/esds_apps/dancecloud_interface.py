@@ -17,7 +17,7 @@ async def fetch_membership_cards(additional_params: Optional[Dict] = None) -> Li
     if additional_params is not None:
         params.update(additional_params)
 
-    with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as client:
         response = await client.get(
             f'{config.DC_HOST}/{config.DC_API_PATH}/membership-cards',
             headers=config.DC_GET_HEADERS,
@@ -51,7 +51,7 @@ async def fetch_membership_cards(additional_params: Optional[Dict] = None) -> Li
 
 
 async def set_membership_card_status(card_uuid: str, status: MembershipCardStatus) -> None:
-    with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as client:
         response = await client.patch(
             f'{config.DC_HOST}/{config.DC_API_PATH}/membership-cards/{card_uuid}',
             headers=config.DC_PATCH_HEADERS,
@@ -66,7 +66,7 @@ async def reissue_membership_card(card_uuid: str, reason: MembershipCardStatus) 
     assert reason in [MembershipCardStatus.DAMAGED, MembershipCardStatus.LOST, MembershipCardStatus.STOLEN], (
         'You may only reissue a card as a result of it being damaged, lost or stolen.'
     )
-    with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient() as client:
         response = await client.post(
             f'{config.DC_HOST}/{config.DC_API_PATH}/membership-cards/{card_uuid}/-actions/reissue',
             headers=config.DC_POST_HEADERS,
