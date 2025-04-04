@@ -28,7 +28,7 @@ async def create_wallet_pass(card: MembershipCard) -> str:
 
     # start by creating a new card within Pass2U
     async with httpx.AsyncClient() as client:
-        response = client.post(
+        response = await client.post(
             f'{config.PASS2U_HOST}/{config.PASS2U_API_PATH}/models/{config.PASS2U_MODEL_ID}/passes',
             json={
                 'expirationDate': localised_expires_at.isoformat(),
