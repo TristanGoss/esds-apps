@@ -21,26 +21,15 @@
         stroke: #ed2224;
         stroke-linecap: round;
         stroke-linejoin: round;
-      }
-
-      .st3, .st4 {
-        fill: none;
-      }
-
-      .st3 {
         stroke-width: 1.5px;
-      }
-
-      .st4 {
-        stroke-width: .2px;
+        fill: none;
       }
 
       .st4 {
         stroke: #231f20;
-      }
-
-      .st4 {
+        stroke-width: .2px;
         stroke-miterlimit: 10;
+        fill: none;
       }
     </style>
   </defs>

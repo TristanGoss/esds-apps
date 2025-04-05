@@ -37,31 +37,39 @@ def credit_card_svg() -> str:
 def generate_card_front_png(card: MembershipCard) -> bytes:
     combined_svg = credit_card_svg()
 
-    # create QR code
-    qr_svg = segno.make(card.check_url, error='m').svg_inline()
+    # create a correctly scaled QR code
+    # Remember QR codes have an ISO-mandated 4-module wide border on all sides, the "quiet zone"!
+    # You can plot the quiet zone by providing light='#ff0000' as an argument to .svg_inline()
+    qr = segno.make(card.check_url, error=config.CARD_LAYOUT_QR_ERROR_CORRECTION)
+    qr_svg = qr.svg_inline(
+        scale=config.CARD_LAYOUT_QR_CODE_WIDTH_MM / qr.symbol_size()[0],
+    )
 
     # load the static svg template
-    # TODO: Replace with Melinda's work and update the positioning & fonts
     with open(config.PUBLIC_DIR / 'membership_card_front.svg', 'rb') as f:
         background = etree.parse(f)
 
     # Add the background
-    g1 = etree.SubElement(combined_svg, 'g', transform=config.CARD_LAYOUT_FRONT_TRANSFORM)
+    g1 = etree.SubElement(combined_svg, 'g')
     for el in background.getroot():
         g1.append(el)
 
     # Add the QR code
-    combined_svg.append(etree.fromstring(f'<g transform="{config.CARD_LAYOUT_QR_TRANSFORM}">{qr_svg}</g>'))
+    combined_svg.append(etree.fromstring(f'<g transform="{config.CARD_LAYOUT_QR_CODE_TRANSFORM}">{qr_svg}</g>'))
 
-    # Add name
-    text = etree.SubElement(combined_svg, 'text', config.CARD_LAYOUT_NAME_PARAMS)
-    text.text = card.first_name + ' ' + card.last_name
+    # Add first name (truncated if necessary)
+    text = etree.SubElement(combined_svg, 'text', config.CARD_LAYOUT_FIRST_NAME_PARAMS)
+    text.text = card.first_name[: config.CARD_LAYOUT_FIRST_NAME_MAX_LENGTH]
 
-    # Add membership card number
+    # Add last name (truncated if necessary)
+    text = etree.SubElement(combined_svg, 'text', config.CARD_LAYOUT_LAST_NAME_PARAMS)
+    text.text = card.last_name[: config.CARD_LAYOUT_LAST_NAME_MAX_LENGTH]
+
+    # Add membership card number (this is a fixed 6 characters)
     text = etree.SubElement(combined_svg, 'text', config.CARD_LAYOUT_CARD_NUMBER_PARAMS)
-    text.text = f'#{card.card_number:06}'
+    text.text = f'CRD: {card.card_number:06}'
 
-    # Add expiry date
+    # Add expiry date (this is also fixed width)
     text = etree.SubElement(combined_svg, 'text', config.CARD_LAYOUT_EXPIRY_DATE_PARAMS)
     text.text = 'EXP: ' + card.expires_at.strftime('%d/%m/%Y')
 
@@ -76,12 +84,11 @@ def generate_card_back_png() -> bytes:
     combined_svg = credit_card_svg()
 
     # load the static svg template
-    # TODO: Replace with Melinda's updated work
     with open(config.PUBLIC_DIR / 'membership_card_back.svg', 'rb') as f:
         background = etree.parse(f)
 
     # Add the background
-    g1 = etree.SubElement(combined_svg, 'g', transform=config.CARD_LAYOUT_BACK_TRANSFORM)
+    g1 = etree.SubElement(combined_svg, 'g')
     for el in background.getroot():
         g1.append(el)
 

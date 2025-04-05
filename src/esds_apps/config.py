@@ -27,24 +27,42 @@ CARD_DPI = 300
 # Define layout as ISO/IEC 7810 ID-1 card
 CARD_LAYOUT_WIDTH_MM = 85.6
 CARD_LAYOUT_HEIGHT_MM = 53.98
-CARD_LAYOUT_FRONT_TRANSFORM = 'translate(0, 0), scale(1.0)'  # leave these in as no-ops for now
-CARD_LAYOUT_BACK_TRANSFORM = 'translate(0, 0), scale(1.0)'  # leave these in as no-ops for now
-CARD_LAYOUT_QR_TRANSFORM = 'translate(5.58, 7.45), scale(0.7)'
-CARD_LAYOUT_NAME_PARAMS = {'x': '5', 'y': '48.5', 'fill': '#00479E', 'font-size': '0.6mm', 'font-family': 'Futura'}
-CARD_LAYOUT_CARD_NUMBER_PARAMS = {
-    'x': '13',
-    'y': '8.2',
+CARD_LAYOUT_QR_ERROR_CORRECTION = 'M'
+CARD_LAYOUT_QR_CODE_WIDTH_MM = 25  # includes 4-symbols-either-side safe zone
+CARD_LAYOUT_QR_CODE_TRANSFORM = 'translate(8, 9)'
+# Do not use units in definitions as renderers will assume 96 DPI and ignore the SVG width and height!
+# Instead, use floating point numbers only!
+# 1pt is 0.3528mm, so 18pt is 6.3504mm, so 18pt font has size 6.3504 below
+CARD_LAYOUT_FIRST_NAME_PARAMS = {
+    'x': '4',
+    'y': '41',
     'fill': '#00479E',
-    'font-size': '0.3mm',
-    'font-family': 'Futura',
+    'font-size': '6.35',
+    'font-family': 'Futura Medium',
+}
+CARD_LAYOUT_FIRST_NAME_MAX_LENGTH = 18  # test this by rendering with the average case name "Anamericalindesontraviel"
+CARD_LAYOUT_LAST_NAME_PARAMS = {
+    'x': '4',
+    'y': '48',
+    'fill': '#00479E',
+    'font-size': '6.35',
+    'font-family': 'Futura Medium',
+}
+CARD_LAYOUT_LAST_NAME_MAX_LENGTH = 20  # test this by rendering with "Anamericalindesontraviel"
+CARD_LAYOUT_CARD_NUMBER_PARAMS = {
+    'x': '78',
+    'y': '5.5',
+    'fill': '#00479E',
+    'transform': 'rotate(90 78 5.5)',
+    'font-size': '3.175',
+    'font-family': 'Futura Medium',
 }
 CARD_LAYOUT_EXPIRY_DATE_PARAMS = {
-    'x': '80',
-    'y': '33',
+    'x': '8',
+    'y': '8',
     'fill': '#00479E',
-    'font-size': '0.3mm',
-    'transform': 'rotate(-90 80 33)',
-    'font-family': 'Futura',
+    'font-size': '3.175',
+    'font-family': 'Futura Medium',
 }
 
 A4_SCREEN_PX_PER_MM = 3.77953  # correct conversion for compositing svgs within an A4 html page
