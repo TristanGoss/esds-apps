@@ -285,6 +285,8 @@ async def printable_pdf(  # noqa: PLR0913
     # Create and return PDF
     context = {
         'request': request,
+        'num_columns': cards_per_row,
+        'num_rows': cards_per_col,
         'card_width_px': card_width_px,
         'card_height_px': card_height_px,
         'margin_top_px': margin_top_px,

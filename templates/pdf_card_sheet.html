@@ -1,47 +1,48 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <!-- we do not use a separte css here since we need to template some values, and this is only ever used to render PDFs. -->
+    <!-- Inline CSS only, as this is used to render PDFs. -->
     <style>
         @page {
             size: A4;
             margin: 0;
         }
-        
+
         body {
             margin: 0;
             padding: 0;
         }
-        
+
         .sheet {
             width: 210mm;
             height: 297mm;
             padding-top: {{ margin_top_px }}px;
             padding-left: {{ margin_left_px }}px;
-            display: flex;
-            flex-wrap: wrap;
+            display: grid;
+            grid-template-columns: repeat({{ num_columns }}, {{ card_width_px }}px);
+            grid-template-rows: repeat({{ num_rows }}, {{ card_height_px }}px);
             gap: {{ vertical_gap_px }}px {{ horizontal_gap_px }}px;
             box-sizing: border-box;
             page-break-after: always;
         }
-        
+
         .sheet.back {
             padding-left: {{ mirrored_margin_left_px }}px;
         }
-        
+
         .card {
             width: {{ card_width_px }}px;
             height: {{ card_height_px }}px;
             box-sizing: border-box;
         }
-        
+
         .card img {
             width: 100%;
             height: 100%;
             object-fit: contain;
             display: block;
         }
-        
+
         .card.placeholder {
             border: 1px dashed #939393;
             background-color: #ebebeb;
@@ -62,5 +63,4 @@
     </div>
     {% endfor %}
 </body>
-
 </html>
