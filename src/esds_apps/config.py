@@ -38,7 +38,7 @@ CARD_LAYOUT_FIRST_NAME_PARAMS = {
     'y': '41',
     'fill': '#00479E',
     'font-size': '6.35',
-    'font-family': 'Futura Medium',
+    'font-family': 'Futura, sans-serif',
 }
 CARD_LAYOUT_FIRST_NAME_MAX_LENGTH = 18  # test this by rendering with the average case name "Anamericalindesontraviel"
 CARD_LAYOUT_LAST_NAME_PARAMS = {
@@ -46,7 +46,7 @@ CARD_LAYOUT_LAST_NAME_PARAMS = {
     'y': '48',
     'fill': '#00479E',
     'font-size': '6.35',
-    'font-family': 'Futura Medium',
+    'font-family': 'Futura, sans-serif',
 }
 CARD_LAYOUT_LAST_NAME_MAX_LENGTH = 20  # test this by rendering with "Anamericalindesontraviel"
 CARD_LAYOUT_CARD_NUMBER_PARAMS = {
@@ -55,14 +55,14 @@ CARD_LAYOUT_CARD_NUMBER_PARAMS = {
     'fill': '#00479E',
     'transform': 'rotate(90 78 5.5)',
     'font-size': '3.175',
-    'font-family': 'Futura Medium',
+    'font-family': 'Futura, sans-serif',
 }
 CARD_LAYOUT_EXPIRY_DATE_PARAMS = {
     'x': '8',
     'y': '8',
     'fill': '#00479E',
     'font-size': '3.175',
-    'font-family': 'Futura Medium',
+    'font-family': 'Futura Medium, sans-serif',
 }
 
 A4_SCREEN_PX_PER_MM = 3.77953  # correct conversion for compositing svgs within an A4 html page

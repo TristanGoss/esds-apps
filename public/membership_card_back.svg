@@ -25,7 +25,7 @@
   <g id="Frame_blue">
     <rect class="st0" x="2" y="2" width="81.6" height="49.98" rx="2" ry="2"/>
   </g>
-  <g id="back_text" font-family="Futura Medium, sans-serif" font-size="3.53" fill="black">
+  <g id="back_text" font-family="Futura, sans-serif" font-size="3.53" fill="black">
     <text x="50%" y="12" text-anchor="middle">This is a Membership Card for the</text>
     <text x="50%" y="24" text-anchor="middle">If you have found this card, and it does not</text>
     <text x="50%" y="28" text-anchor="middle">belong to you, please contact</text>
