@@ -65,7 +65,6 @@ CARD_LAYOUT_EXPIRY_DATE_PARAMS = {
     'font-family': 'Futura Medium, sans-serif',
 }
 
-A4_SCREEN_PX_PER_MM = 3.77953  # correct conversion for compositing svgs within an A4 html page
 A4_WIDTH_MM = 210
 A4_HEIGHT_MM = 297
 

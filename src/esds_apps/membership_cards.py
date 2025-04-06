@@ -222,20 +222,12 @@ async def printable_pdf(  # noqa: PLR0913
     vertical_gap_mm: float,
 ) -> bytes:
     """Create a printable pdf containing the card faces."""
-    # Convert mm to px for layout
-    card_width_px = card_width_mm * config.A4_SCREEN_PX_PER_MM
-    card_height_px = card_height_mm * config.A4_SCREEN_PX_PER_MM
-    margin_top_px = margin_top_mm * config.A4_SCREEN_PX_PER_MM
-    margin_left_px = margin_left_mm * config.A4_SCREEN_PX_PER_MM
-    horizontal_gap_px = horizontal_gap_mm * config.A4_SCREEN_PX_PER_MM
-    vertical_gap_px = vertical_gap_mm * config.A4_SCREEN_PX_PER_MM
-
     # Calculate how many cards fit per page
-    usable_w = (config.A4_WIDTH_MM * config.A4_SCREEN_PX_PER_MM) - margin_left_px
-    usable_h = (config.A4_HEIGHT_MM * config.A4_SCREEN_PX_PER_MM) - margin_top_px
+    usable_w = config.A4_WIDTH_MM - margin_left_mm
+    usable_h = config.A4_HEIGHT_MM - margin_top_mm
 
-    cards_per_row = floor((usable_w + horizontal_gap_px) / (card_width_px + horizontal_gap_px))
-    cards_per_col = floor((usable_h + vertical_gap_px) / (card_height_px + vertical_gap_px))
+    cards_per_row = floor((usable_w + horizontal_gap_mm) / (card_width_mm + horizontal_gap_mm))
+    cards_per_col = floor((usable_h + vertical_gap_mm) / (card_height_mm + vertical_gap_mm))
     cards_per_page = cards_per_row * cards_per_col
     log.debug(
         f'Each A4 page will contain {cards_per_row} rows and {cards_per_col} columns '
@@ -278,22 +270,21 @@ async def printable_pdf(  # noqa: PLR0913
     log.debug(f'The generated pdf will contain {len(interleaved_pages)} pages')
 
     # Calculate left margin for mirrored page
-    grid_width_px = cards_per_row * card_width_px + (cards_per_row - 1) * horizontal_gap_px
-    page_width_px = config.A4_WIDTH_MM * config.A4_SCREEN_PX_PER_MM
-    mirrored_margin_left_px = page_width_px - (grid_width_px + margin_left_px)
+    grid_width_mm = cards_per_row * card_width_mm + (cards_per_row - 1) * horizontal_gap_mm
+    mirrored_margin_left_mm = config.A4_WIDTH_MM - (grid_width_mm + margin_left_mm)
 
     # Create and return PDF
     context = {
         'request': request,
         'num_columns': cards_per_row,
         'num_rows': cards_per_col,
-        'card_width_px': card_width_px,
-        'card_height_px': card_height_px,
-        'margin_top_px': margin_top_px,
-        'margin_left_px': margin_left_px,
-        'horizontal_gap_px': horizontal_gap_px,
-        'vertical_gap_px': vertical_gap_px,
-        'mirrored_margin_left_px': mirrored_margin_left_px,
+        'card_width_mm': card_width_mm,
+        'card_height_mm': card_height_mm,
+        'margin_top_mm': margin_top_mm,
+        'margin_left_mm': margin_left_mm,
+        'horizontal_gap_mm': horizontal_gap_mm,
+        'vertical_gap_mm': vertical_gap_mm,
+        'mirrored_margin_left_mm': mirrored_margin_left_mm,
         'pages': interleaved_pages,
     }
 

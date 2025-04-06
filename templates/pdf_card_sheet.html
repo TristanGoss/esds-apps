@@ -16,23 +16,23 @@
         .sheet {
             width: 210mm;
             height: 297mm;
-            padding-top: {{ margin_top_px }}px;
-            padding-left: {{ margin_left_px }}px;
+            padding-top: {{ margin_top_mm }}mm;
+            padding-left: {{ margin_left_mm }}mm;
             display: grid;
-            grid-template-columns: repeat({{ num_columns }}, {{ card_width_px }}px);
-            grid-template-rows: repeat({{ num_rows }}, {{ card_height_px }}px);
-            gap: {{ vertical_gap_px }}px {{ horizontal_gap_px }}px;
+            grid-template-columns: repeat({{ num_columns }}, {{ card_width_mm }}mm);
+            grid-template-rows: repeat({{ num_rows }}, {{ card_height_mm }}mm);
+            gap: {{ vertical_gap_mm }}mm {{ horizontal_gap_mm }}mm;
             box-sizing: border-box;
             page-break-after: always;
         }
 
         .sheet.back {
-            padding-left: {{ mirrored_margin_left_px }}px;
+            padding-left: {{ mirrored_margin_left_mm }}mm;
         }
 
         .card {
-            width: {{ card_width_px }}px;
-            height: {{ card_height_px }}px;
+            width: {{ card_width_mm }}mm;
+            height: {{ card_height_mm }}mm;
             box-sizing: border-box;
         }
 
