@@ -27,8 +27,8 @@
   </g>
   <g id="back_text" font-family="Futura, sans-serif" font-size="3.53" fill="black">
     <text x="50%" y="12" text-anchor="middle">This is a Membership Card for the</text>
-    <text x="50%" y="24" text-anchor="middle">If you have found this card, and it does not</text>
-    <text x="50%" y="28" text-anchor="middle">belong to you, please contact</text>
+    <text x="50%" y="24" text-anchor="middle">If you have found this card and it does not</text>
+    <text x="50%" y="28" text-anchor="middle">belong to you, please email</text>
     <text x="50%" y="35" font-size="4.23" text-anchor="middle" fill="#ed2224" font-weight="bold">info@esds.org.uk</text>
   </g>
   <g id="Big_Logo" class="st2" transform="translate(6.2, 0) scale(0.3)">
