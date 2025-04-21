@@ -107,9 +107,6 @@ async def auto_issue_unissued_cards() -> None:
         new_cards = await fetch_membership_cards({'filter[status]': 'new'})
         log.info(f'found {len(new_cards)} new cards to issue.')
 
-        # TODO: The "add to Google/Apple wallet" option is non-trivial,
-        # since it's certified proof.
-
         emails = [await compose_membership_email(card) for card in new_cards]
         log.info(f'composed {len(emails)} membership emails.')
 
@@ -119,7 +116,7 @@ async def auto_issue_unissued_cards() -> None:
 
         # for delivered, card in zip(succesfully_delivered, new_cards):
         #     if delivered:
-        #         set_dancecloud_card_status(card.card_uuid, MembershipCardStatus.ISSUED)
+        #         set_membership_card_status(card.card_uuid, MembershipCardStatus.ISSUED)
         log.info('Dancecloud unissued cards poller returning to sleep.')
 
 

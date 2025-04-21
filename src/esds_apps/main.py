@@ -15,7 +15,11 @@ from esds_apps.auth import password_auth, require_valid_cookie
 from esds_apps.classes import MembershipCardStatus, PrintablePdfError
 from esds_apps.dancecloud_interface import fetch_membership_cards, reissue_membership_card
 from esds_apps.membership_cards import auto_issue_unissued_cards, generate_card_front_png, printable_pdf
-from esds_apps.pass2u_interface import MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE, create_wallet_pass, void_wallet_pass
+from esds_apps.pass2u_interface import (
+    MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE,
+    create_wallet_pass,
+    void_wallet_pass_if_exists,
+)
 
 logging.basicConfig(
     level=config.LOGGING_LEVEL,
@@ -76,8 +80,8 @@ async def reissue_card(
     # but the dancecloud reissue route wants the card_uuid as an argument.
     card_to_void = [card for card in await fetch_membership_cards() if card.card_uuid == card_uuid][0]
 
-    # void the associated wallet pass
-    await void_wallet_pass(card_to_void)
+    # void the associated wallet pass, if it exists
+    await void_wallet_pass_if_exists(card_to_void)
 
     # reissue the card via dancecloud - this will cause the periodic check to pick it up and issue an email later on.
     await reissue_membership_card(card_uuid, reason)

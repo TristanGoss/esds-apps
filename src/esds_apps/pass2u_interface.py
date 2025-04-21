@@ -63,10 +63,10 @@ async def create_wallet_pass(card: MembershipCard) -> str:
     return result['passId']
 
 
-async def void_wallet_pass(card: MembershipCard) -> None:
+async def void_wallet_pass_if_exists(card: MembershipCard) -> None:
     card_number = card.card_number  # we only pass the whole card in for consistency
     current_cache_content = MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE.read()
-    if current_cache_content:
+    if current_cache_content and str(card_number) in current_cache_content:
         pass_id_to_void = current_cache_content[str(card_number)]
         log.debug(f'about to void wallet pass for card number {card_number}, wallet pass Id {pass_id_to_void}')
 
@@ -85,14 +85,12 @@ async def void_wallet_pass(card: MembershipCard) -> None:
 
         response.raise_for_status()
         log.info(f'wallet pass for card number {card_number} voided.')
-    else:
-        raise RuntimeError(
-            f'Cannot void wallet pass for membership card number {card_number} '
-            'because we do not have a record of its associated passId - '
-            'please do this manually through the Pass2U website.'
-        )
 
-    # remove voided wallet pass from cache
-    del current_cache_content[str(card_number)]
-    MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE.clear()
-    MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE.write(current_cache_content)
+        # remove voided wallet pass from cache
+        del current_cache_content[str(card_number)]
+        MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE.clear()
+        MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE.write(current_cache_content)
+    else:
+        log.info(
+            f'Could not void wallet pass for card number {card_number} as no wallet pass was found in the local cache.'
+        )
