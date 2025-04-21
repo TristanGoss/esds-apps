@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ESDS Membership Card Check Logs</title>
+    <link rel="icon" href="/public/favicon.ico">
+    <link rel="stylesheet" href="/public/css/membership_cards.css">
+</head>
+<body>
+    <h1>ESDS Membership Card Check Logs</h1>
+    <p>
+        The table below shows all of the card checks that have taken place within the last 30 days.
+    </p>
+    <p>
+        You can <a href="download?days_ago=30">download this information as a .csv file</a>, 
+        or <a href="download?days_ago=9999">download all of the card checks ever made as a .csv file</a>.
+    </p>
+    <label for="filter-first-name">Filter by First Name:</label>
+    <input type="text" id="filter-first-name" placeholder="e.g. Alice" style="margin-bottom: 1em;">
+    <table>
+        <thead>
+            <tr>
+                <th>Card Number</th>
+                <th>First Name</th>
+                <th>Last Name</th>
+                <th>Checked By</th>
+                <th>Checked At</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for check in checks %}
+            <tr>
+                <td>{{ check.card_number }}</td>
+                <td>{{ check.first_name }}</td>
+                <td>{{ check.last_name }}</td>
+                <td>{{ check.checked_by }}</td>
+                <td>{{ check.checked_at.strftime("%d-%m-%Y %H:%M:%S") }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <script src="/public/js/check_logs.js"></script>
+</body>
+</html>

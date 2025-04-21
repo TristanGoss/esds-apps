@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 import httpx
 
 from esds_apps import config
-from esds_apps.classes import MembershipCard, MembershipCardStatus
+from esds_apps.classes import MembershipCard, MembershipCardCheck, MembershipCardStatus
 
 log = logging.getLogger(__name__)
 
@@ -48,6 +48,53 @@ async def fetch_membership_cards(additional_params: Optional[Dict] = None) -> Li
     log.debug(f'Found {len(cards)} membership cards.')
 
     return cards
+
+
+async def fetch_membership_card_checks(additional_params: Optional[Dict] = None) -> List[MembershipCardCheck]:
+    log.debug('Polling Dancecloud for membership card checks...')
+
+    params = {'page[size]': 9999, 'include': 'card.member,checkedBy'}
+    if additional_params is not None:
+        params.update(additional_params)
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f'{config.DC_HOST}/{config.DC_API_PATH}/membership-card-checks',
+            headers=config.DC_GET_HEADERS,
+            params=params,
+        )
+    response.raise_for_status()
+
+    # parse the output to extract the bits we care about
+    check_data = response.json()['data']
+    membership_card_data = [x for x in response.json()['included'] if x['type'] == 'membership-cards']
+    member_data = [x for x in response.json()['included'] if x['type'] == 'members']
+    checks = []
+
+    for d in check_data:
+        membership_card_details = [
+            x for x in membership_card_data if x['id'] == d['relationships']['card']['data']['id']
+        ][0]
+        member_details = [
+            x for x in member_data if x['id'] == membership_card_details['relationships']['member']['data']['id']
+        ][0]
+        checks.append(
+            MembershipCardCheck(
+                member_uuid=member_details['id'],
+                card_uuid=membership_card_details['id'],
+                card_number=membership_card_details['attributes']['number'],
+                first_name=member_details['attributes']['firstName'],
+                last_name=member_details['attributes']['lastName'],
+                checked_at=datetime.fromisoformat(d['attributes']['checkedAt']),
+                checked_by=d['relationships']['checkedBy']['data']['id']
+                if d['relationships']['checkedBy']['data'] is not None
+                else None,
+            )
+        )
+
+    log.debug(f'Found {len(checks)} membership card checks.')
+
+    return checks
 
 
 async def set_membership_card_status(card_uuid: str, status: MembershipCardStatus) -> None:

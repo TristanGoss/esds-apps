@@ -1,11 +1,16 @@
 import asyncio
+import csv
+import io
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import asdict
+from datetime import datetime, timedelta
 from http import HTTPStatus
 from io import BytesIO
 from typing import List
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request
+import pytz
+from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -13,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from esds_apps import config
 from esds_apps.auth import password_auth, require_valid_cookie
 from esds_apps.classes import MembershipCardStatus, PrintablePdfError
-from esds_apps.dancecloud_interface import fetch_membership_cards, reissue_membership_card
+from esds_apps.dancecloud_interface import fetch_membership_card_checks, fetch_membership_cards, reissue_membership_card
 from esds_apps.membership_cards import auto_issue_unissued_cards, generate_card_front_png, printable_pdf
 from esds_apps.pass2u_interface import (
     MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE,
@@ -68,6 +73,45 @@ async def landing_page(request: Request):
 async def membership_cards(request: Request):
     return config.TEMPLATES.TemplateResponse(
         request, 'membership_cards.html', {'cards': await fetch_membership_cards()}
+    )
+
+
+@app.get('/membership-cards/checks/logs', response_class=HTMLResponse)
+async def card_scanning_log(request: Request, _: None = Depends(require_valid_cookie)):
+    card_checks = await fetch_membership_card_checks()
+    return config.TEMPLATES.TemplateResponse(
+        request,
+        'check_logs.html',
+        {
+            'checks': [
+                check
+                for check in card_checks
+                if check.checked_at > datetime.now(pytz.timezone('Europe/London')) - timedelta(days=30)
+            ]
+        },
+    )
+
+
+@app.get('/membership-cards/checks/download', response_class=StreamingResponse)
+async def download_checks(days_ago: int = Query(ge=0), _: None = Depends(require_valid_cookie)):
+    card_checks = await fetch_membership_card_checks()
+    rows = [
+        asdict(check)
+        for check in card_checks
+        if check.checked_at > datetime.now(pytz.timezone('Europe/London')) - timedelta(days=days_ago)
+    ]
+
+    # Prepare CSV output
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=rows[0].keys())
+    writer.writeheader()
+    writer.writerows(rows)
+    buffer.seek(0)
+
+    return StreamingResponse(
+        buffer,
+        media_type='text/csv',
+        headers={'Content-Disposition': 'attachment; filename=membership_card_checks.csv'},
     )
 
 

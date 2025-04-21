@@ -16,20 +16,30 @@ class MembershipCardStatus(StrEnum):
 
 
 @dataclass(frozen=True)
-class MembershipCard:
+class _MembershipCommon:
     card_uuid: str
     member_uuid: str
     card_number: int
-    expires_at: datetime
     first_name: str
     last_name: str
+
+
+@dataclass(frozen=True)
+class MembershipCard(_MembershipCommon):
     email: str
     status: MembershipCardStatus
+    expires_at: datetime
 
     @property
     def check_url(self) -> str:
         """URL for the QR code on the membership card."""
         return f'{DC_HOST}/members/cards/{self.card_uuid}/check'
+
+
+@dataclass(frozen=True)
+class MembershipCardCheck(_MembershipCommon):
+    checked_at: datetime
+    checked_by: str
 
 
 class PrintablePdfError(ValueError):
