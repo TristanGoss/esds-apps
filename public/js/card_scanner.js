@@ -28,7 +28,7 @@ function showResult(message, isValid) {
 
 async function validateCard(data) {
   try {
-    const res = await fetch(`/anti-cors-proxy?url=${encodeURIComponent(data)}`);
+    const res = await fetch(`/proxy-card-check?url=${encodeURIComponent(data)}`);
     const text = await res.text();
     const valid = text.includes("This membership card is valid");
     showResult(valid ? "✅ CARD VALID" : "❌ CARD INVALID", valid);

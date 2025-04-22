@@ -83,15 +83,18 @@ async def scanner(request: Request):
     return config.TEMPLATES.TemplateResponse('rapid_scanner.html', {'request': request})
 
 
-@app.get('/anti-cors-proxy')
-async def anti_cors_proxy(url: str):
+@app.get('/proxy-card-check')
+async def proxy_card_check(url: str):
     """Prevent CORS from blocking access between the client and Dancecloud.
 
-    Used together with the /scanner route.
+    Used together with the /membership-cards/scanner route.
     """
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(url)
-    return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get('content-type'))
+    if url.startswith(config.DC_HOST):
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url)
+        return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get('content-type'))
+    else:
+        return f'url did not start with {config.DC_HOST}, so has not been proxied.'
 
 
 @app.get('/membership-cards/checks/logs', response_class=HTMLResponse)
