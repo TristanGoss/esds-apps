@@ -6,10 +6,10 @@
     <link rel="stylesheet" href="/public/css/membership_cards.css">
 </head>
 <body>
+    {% include "membership_navbar.html" %}
     <h1>ESDS Membership Cards</h1>
     <p>Welcome to the Membership Card management page. Here, you can monitor the status of all existing membership cards,
-        reissue them if they are lost, stolen or damaged, <a href="membership-cards/checks/logs">monitor when their QR codes were last scanned</a>, and download
-        A4 sheets that can be used to print the cards.
+        reissue them if they are lost, stolen or damaged, and download A4 sheets that can be used to print the cards.
         Remember that we integrate with both <a href="https://www.dancecloud.com" target="_blank">Dancecloud</a> 
         and <a href="https://www.pass2u.net/" target="_blank">Pass2U</a>, so you may want to log in there as well.
     </p>
@@ -80,6 +80,11 @@
             <p>
                 Please specify the margins for the A4 print layout for the selected cards.
                 Odd-numbered pages will contain card fronts, even-numbered pages will contain card backs.
+            </p>
+            <p>
+                The cards should be printed on 95um Xerox Premium NeverTear synthetic paper using double-sided printing,
+                the whole sheet laminated, and then each card cut out individually.
+                When cutting, <b>do not</b> leave a laminate-only "border" around the cards.
             </p>
             <form id="layout-form" method="POST" action="/membership-cards/print-layout/pdf">
                 <div class="print-layout-form-row">

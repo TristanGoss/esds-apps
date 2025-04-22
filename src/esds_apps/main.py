@@ -77,10 +77,10 @@ async def membership_cards(request: Request):
     )
 
 
-@app.get('/scanner', response_class=HTMLResponse)
+@app.get('/membership-cards/scanner', response_class=HTMLResponse)
 @password_auth
 async def scanner(request: Request):
-    return config.TEMPLATES.TemplateResponse('card_scanner.html', {'request': request})
+    return config.TEMPLATES.TemplateResponse('rapid_scanner.html', {'request': request})
 
 
 @app.get('/anti-cors-proxy')
@@ -101,11 +101,15 @@ async def card_scanning_log(request: Request, _: None = Depends(require_valid_co
         request,
         'check_logs.html',
         {
-            'checks': [
-                check
-                for check in card_checks
-                if check.checked_at > datetime.now(pytz.timezone('Europe/London')) - timedelta(days=30)
-            ]
+            'checks': sorted(
+                [
+                    check
+                    for check in card_checks
+                    if check.checked_at > datetime.now(pytz.timezone('Europe/London')) - timedelta(days=30)
+                ],
+                reverse=True,
+                key=lambda x: x.checked_at,
+            )
         },
     )
 
@@ -113,11 +117,15 @@ async def card_scanning_log(request: Request, _: None = Depends(require_valid_co
 @app.get('/membership-cards/checks/download', response_class=StreamingResponse)
 async def download_checks(days_ago: int = Query(ge=0), _: None = Depends(require_valid_cookie)):
     card_checks = await fetch_membership_card_checks()
-    rows = [
-        asdict(check)
-        for check in card_checks
-        if check.checked_at > datetime.now(pytz.timezone('Europe/London')) - timedelta(days=days_ago)
-    ]
+    rows = sorted(
+        [
+            asdict(check)
+            for check in card_checks
+            if check.checked_at > datetime.now(pytz.timezone('Europe/London')) - timedelta(days=days_ago)
+        ],
+        reverse=True,
+        key=lambda x: x.checked_at,
+    )
 
     # Prepare CSV output
     buffer = io.StringIO()
