@@ -76,6 +76,12 @@ async def membership_cards(request: Request):
     )
 
 
+@app.get('/scanner', response_class=HTMLResponse)
+@password_auth
+async def scanner(request: Request):
+    return config.TEMPLATES.TemplateResponse('card_scanner.html', {'request': request})
+
+
 @app.get('/membership-cards/checks/logs', response_class=HTMLResponse)
 async def card_scanning_log(request: Request, _: None = Depends(require_valid_cookie)):
     card_checks = await fetch_membership_card_checks()
