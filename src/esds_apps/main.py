@@ -9,6 +9,7 @@ from http import HTTPStatus
 from io import BytesIO
 from typing import List
 
+import httpx
 import pytz
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -80,6 +81,17 @@ async def membership_cards(request: Request):
 @password_auth
 async def scanner(request: Request):
     return config.TEMPLATES.TemplateResponse('card_scanner.html', {'request': request})
+
+
+@app.get('/anti-cors-proxy')
+async def anti_cors_proxy(url: str):
+    """Prevent CORS from blocking access between the client and Dancecloud.
+
+    Used together with the /scanner route.
+    """
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(url)
+    return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get('content-type'))
 
 
 @app.get('/membership-cards/checks/logs', response_class=HTMLResponse)
