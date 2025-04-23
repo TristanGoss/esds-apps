@@ -78,7 +78,6 @@ async def membership_cards(request: Request):
 
 
 @app.get('/membership-cards/scanner', response_class=HTMLResponse)
-@password_auth
 async def scanner(request: Request):
     return config.TEMPLATES.TemplateResponse('rapid_scanner.html', {'request': request})
 
