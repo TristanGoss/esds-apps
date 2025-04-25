@@ -19,7 +19,12 @@ from fastapi.staticfiles import StaticFiles
 from esds_apps import config
 from esds_apps.auth import password_auth, require_valid_cookie
 from esds_apps.classes import MembershipCardStatus, PrintablePdfError
-from esds_apps.dancecloud_interface import fetch_membership_card_checks, fetch_membership_cards, reissue_membership_card
+from esds_apps.dancecloud_interface import (
+    fetch_membership_card_checks,
+    fetch_membership_cards,
+    reissue_membership_card,
+    set_membership_card_status,
+)
 from esds_apps.membership_cards import auto_issue_unissued_cards, generate_card_front_png, printable_pdf
 from esds_apps.pass2u_interface import (
     MAP_CARD_NUMBER_TO_WALLET_PASS_ID_CACHE,
@@ -158,6 +163,24 @@ async def reissue_card(
     # reissue the card via dancecloud - this will cause the periodic check to pick it up and issue an email later on.
     await reissue_membership_card(card_uuid, reason)
     log.info(f'Reissued card with UUID {card_uuid} because it was {reason}')
+
+    # Redirect back to the table view
+    return RedirectResponse(url='/membership_cards', status_code=303)
+
+
+@app.post('/membership-cards/{card_uuid}/cancel', response_class=RedirectResponse)
+async def cancel_card(request: Request, card_uuid: str, _: None = Depends(require_valid_cookie)):
+    # find the full details of the card that this UUID refers to
+    # Why do this? Because we can only filter on card number,
+    # but the dancecloud reissue route wants the card_uuid as an argument.
+    card_to_cancel = [card for card in await fetch_membership_cards() if card.card_uuid == card_uuid][0]
+
+    # void the associated wallet pass, if it exists
+    await void_wallet_pass_if_exists(card_to_cancel)
+
+    # reissue the card via dancecloud - this will cause the periodic check to pick it up and issue an email later on.
+    await set_membership_card_status(card_uuid, MembershipCardStatus.CANCELLED)
+    log.info(f'Cancelled card with UUID {card_uuid}')
 
     # Redirect back to the table view
     return RedirectResponse(url='/membership_cards', status_code=303)

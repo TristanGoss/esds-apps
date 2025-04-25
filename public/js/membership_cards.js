@@ -133,3 +133,19 @@ function submitReissue(cardUuid, cardFirstName) {
     document.body.appendChild(form);
     form.submit();
 }
+
+// Submit a request to cancel a card
+function submitCancel(cardUuid, cardFirstName) {
+    const confirmMsg = `Are you sure you want to cancel the membership card belonging to ${cardFirstName}?`;
+    const confirmed = window.confirm(confirmMsg);
+
+    if (!confirmed) return;
+
+    // Create and submit a form dynamically
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = `/membership-cards/${cardUuid}/cancel`;
+
+    document.body.appendChild(form);
+    form.submit();
+}
