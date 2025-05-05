@@ -131,7 +131,7 @@ async def download_checks(days_ago: int = Query(ge=0), _: None = Depends(require
             if check.checked_at > datetime.now(pytz.timezone('Europe/London')) - timedelta(days=days_ago)
         ],
         reverse=True,
-        key=lambda x: x.checked_at,
+        key=lambda x: x['checked_at'],
     )
 
     # Prepare CSV output
