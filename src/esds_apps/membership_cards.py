@@ -17,8 +17,8 @@ from lxml import etree
 from weasyprint import HTML
 
 from esds_apps import config
-from esds_apps.classes import MembershipCard, PrintablePdfError
-from esds_apps.dancecloud_interface import fetch_membership_cards
+from esds_apps.classes import MembershipCard, MembershipCardStatus, PrintablePdfError
+from esds_apps.dancecloud_interface import fetch_membership_cards, set_membership_card_status
 
 log = logging.getLogger(__name__)
 
@@ -110,13 +110,18 @@ async def auto_issue_unissued_cards() -> None:
         emails = [await compose_membership_email(card) for card in new_cards]
         log.info(f'composed {len(emails)} membership emails.')
 
-        # TODO: restore for committee test
-        # succesfully_delivered = send_emails(emails)
-        # log.info(f'succesfully sent {sum(succesfully_delivered)} emails.')
+        if config.SECRETS['IS_CARD_DISTRIBUTION_ENABLED'].lower() in ['true', 'yes', 'on', '1']:
+            succesfully_delivered = send_emails(emails)
+            log.info(f'succesfully sent {sum(succesfully_delivered)} emails.')
 
-        # for delivered, card in zip(succesfully_delivered, new_cards):
-        #     if delivered:
-        #         set_membership_card_status(card.card_uuid, MembershipCardStatus.ISSUED)
+            for delivered, card in zip(succesfully_delivered, new_cards):
+                if delivered:
+                    set_membership_card_status(card.card_uuid, MembershipCardStatus.ISSUED)
+        else:
+            log.info(
+                f'did not issue any cards as IS_CARD_DISTRIBUTION_ENABLED is set to '
+                f'{config.SECRETS["IS_CARD_DISTRIBUTION_ENABLED"]}, which we consider falsey'
+            )
         log.info('Dancecloud unissued cards poller returning to sleep.')
 
 
