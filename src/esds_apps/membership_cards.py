@@ -106,7 +106,7 @@ async def auto_issue_unissued_cards() -> None:
         new_cards = await fetch_membership_cards({'filter[status]': 'new'})
         log.info(f'found {len(new_cards)} new cards to issue.')
 
-        if config.SECRETS['IS_CARD_DISTRIBUTION_ENABLED'].lower() in ['true', 'yes', 'on', '1']:
+        if config.IS_CARD_DISTRIBUTION_ENABLED:
             # send emails in batches to reduce damage if a non-SMTP error is thrown.
             for i in range(0, len(new_cards), config.CARD_DISTRIBUTION_EMAIL_BATCH_SIZE):
                 card_batch = new_cards[i : i + config.CARD_DISTRIBUTION_EMAIL_BATCH_SIZE]
@@ -122,7 +122,7 @@ async def auto_issue_unissued_cards() -> None:
         else:
             log.info(
                 f'did not issue any cards as IS_CARD_DISTRIBUTION_ENABLED is set to '
-                f'{config.SECRETS["IS_CARD_DISTRIBUTION_ENABLED"]}'
+                f'{config.IS_CARD_DISTRIBUTION_ENABLED}'
             )
         log.info('Dancecloud unissued cards poller returning to sleep.')
         await asyncio.sleep(config.DC_POLL_INTERVAL_S)
