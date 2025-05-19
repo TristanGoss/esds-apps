@@ -106,15 +106,14 @@ async def auto_issue_unissued_cards() -> None:
         new_cards = await fetch_membership_cards({'filter[status]': 'new'})
         log.info(f'found {len(new_cards)} new cards to issue.')
 
-        emails = [await compose_membership_email(card) for card in new_cards]
-        log.info(f'composed {len(emails)} membership emails.')
-
         if config.SECRETS['IS_CARD_DISTRIBUTION_ENABLED'].lower() in ['true', 'yes', 'on', '1']:
             # send emails in batches to reduce damage if a non-SMTP error is thrown.
-            for i in range(0, len(emails), config.CARD_DISTRIBUTION_EMAIL_BATCH_SIZE):
-                email_batch = emails[i : i + config.CARD_DISTRIBUTION_EMAIL_BATCH_SIZE]
+            for i in range(0, len(new_cards), config.CARD_DISTRIBUTION_EMAIL_BATCH_SIZE):
                 card_batch = new_cards[i : i + config.CARD_DISTRIBUTION_EMAIL_BATCH_SIZE]
-                succesfully_delivered = send_emails(email_batch)
+                emails = [await compose_membership_email(card) for card in card_batch]
+                log.info(f'composed {len(emails)} membership emails.')
+
+                succesfully_delivered = send_emails(emails)
                 log.info(f'succesfully sent {sum(succesfully_delivered)} emails.')
 
                 for delivered, card in zip(succesfully_delivered, card_batch):
