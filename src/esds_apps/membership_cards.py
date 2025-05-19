@@ -102,7 +102,6 @@ def generate_card_back_png() -> bytes:
 async def auto_issue_unissued_cards() -> None:
     log.debug('Dancecloud unissued cards poller started.')
     while True:
-        await asyncio.sleep(config.DC_POLL_INTERVAL_S)
         log.info('Dancecloud unissued cards poller awoken.')
         new_cards = await fetch_membership_cards({'filter[status]': 'new'})
         log.info(f'found {len(new_cards)} new cards to issue.')
@@ -120,9 +119,10 @@ async def auto_issue_unissued_cards() -> None:
         else:
             log.info(
                 f'did not issue any cards as IS_CARD_DISTRIBUTION_ENABLED is set to '
-                f'{config.SECRETS["IS_CARD_DISTRIBUTION_ENABLED"]}, which we consider falsey'
+                f'{config.SECRETS["IS_CARD_DISTRIBUTION_ENABLED"]}'
             )
         log.info('Dancecloud unissued cards poller returning to sleep.')
+        await asyncio.sleep(config.DC_POLL_INTERVAL_S)
 
 
 async def compose_membership_email(card: MembershipCard) -> EmailMessage:
@@ -182,9 +182,10 @@ def send_emails(emails: List[EmailMessage]) -> List[bool]:
         smtp.login('info@esds.org.uk', config.SECRETS['GMAIL_APP_PASSWORD'])
         for i, email in enumerate(emails):
             try:
-                log.debug(f'About to send new email to {email["To"]}')
+                log.debug(f'About to send email to {email["To"]}')
                 smtp.send_message(email)
                 was_email_succesfully_delivered[i] = True
+                log.debug(f'Succesfully sent email to {email["To"]}')
             except SMTPResponseException as e:
                 log.error(
                     f'Email was not delivered; SMTP error: {e.smtp_code} - {e.smtp_error.decode(errors="ignore")}'

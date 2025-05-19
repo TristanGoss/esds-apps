@@ -9,10 +9,11 @@ LOGGING_LEVEL = logging.DEBUG
 CACHE_ROOT = '/tmp/esds_cache'
 
 SECRETS = dotenv_values('.env')
-for var_name in ['DC_API_TOKEN', 'GMAIL_APP_PASSWORD', 'UI_PASSWORD', 'PASS2U_API_KEY', 'IS_CARD_DISTRIBUTION_ENABLED']:
+for var_name in ['DC_API_TOKEN', 'GMAIL_APP_PASSWORD', 'UI_PASSWORD', 'PASS2U_API_KEY']:
     if var_name not in SECRETS:
         raise RuntimeError(f'Environment variable {var_name} is missing from the .env file.')
 
+IS_CARD_DISTRIBUTION_ENABLED = False
 AUTH_COOKIE_NAME = 'esds_apps_auth'
 AUTH_COOKIE_TIMEOUT_SECONDS = 24 * 60 * 60
 AUTH_MAX_LOGIN_ATTEMPTS = 10
@@ -69,8 +70,8 @@ A4_WIDTH_MM = 210
 A4_HEIGHT_MM = 297
 
 DC_API_PATH = 'api/v1'
-DC_HOST = 'https://esds-test.dancecloud.xyz'
-DC_POLL_INTERVAL_S = 86400
+DC_HOST = 'https://esds.dancecloud.com'
+DC_POLL_INTERVAL_S = 60 * 60 * 24
 DC_GET_HEADERS = {'Authorization': f'Bearer {SECRETS["DC_API_TOKEN"]}', 'Accept': 'application/vnd.api+json'}
 DC_PATCH_HEADERS = {**DC_GET_HEADERS, 'Content-Type': 'application/vnd.api+json'}
 DC_POST_HEADERS = {**DC_GET_HEADERS, 'Content-Type': 'application/json'}

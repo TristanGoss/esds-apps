@@ -11,6 +11,7 @@ log = logging.getLogger(__name__)
 
 
 async def fetch_membership_cards(additional_params: Optional[Dict] = None) -> List[MembershipCard]:
+    # Note that this returns membership cards for *all* schemes at the moment!
     log.debug('Polling Dancecloud for membership cards...')
 
     params = {'page[size]': 9999, 'include': 'member'}
