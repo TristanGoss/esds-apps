@@ -118,7 +118,7 @@ async def auto_issue_unissued_cards() -> None:
 
                 for delivered, card in zip(succesfully_delivered, card_batch):
                     if delivered:
-                        set_membership_card_status(card.card_uuid, MembershipCardStatus.ISSUED)
+                        await set_membership_card_status(card.card_uuid, MembershipCardStatus.ISSUED)
         else:
             log.info(
                 f'did not issue any cards as IS_CARD_DISTRIBUTION_ENABLED is set to '
