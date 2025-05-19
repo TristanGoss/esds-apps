@@ -110,12 +110,16 @@ async def auto_issue_unissued_cards() -> None:
         log.info(f'composed {len(emails)} membership emails.')
 
         if config.SECRETS['IS_CARD_DISTRIBUTION_ENABLED'].lower() in ['true', 'yes', 'on', '1']:
-            succesfully_delivered = send_emails(emails)
-            log.info(f'succesfully sent {sum(succesfully_delivered)} emails.')
+            # send emails in batches to reduce damage if a non-SMTP error is thrown.
+            for i in range(0, len(emails), config.CARD_DISTRIBUTION_EMAIL_BATCH_SIZE):
+                email_batch = emails[i : i + config.CARD_DISTRIBUTION_EMAIL_BATCH_SIZE]
+                card_batch = new_cards[i : i + config.CARD_DISTRIBUTION_EMAIL_BATCH_SIZE]
+                succesfully_delivered = send_emails(email_batch)
+                log.info(f'succesfully sent {sum(succesfully_delivered)} emails.')
 
-            for delivered, card in zip(succesfully_delivered, new_cards):
-                if delivered:
-                    set_membership_card_status(card.card_uuid, MembershipCardStatus.ISSUED)
+                for delivered, card in zip(succesfully_delivered, card_batch):
+                    if delivered:
+                        set_membership_card_status(card.card_uuid, MembershipCardStatus.ISSUED)
         else:
             log.info(
                 f'did not issue any cards as IS_CARD_DISTRIBUTION_ENABLED is set to '

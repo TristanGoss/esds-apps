@@ -14,6 +14,7 @@ for var_name in ['DC_API_TOKEN', 'GMAIL_APP_PASSWORD', 'UI_PASSWORD', 'PASS2U_AP
         raise RuntimeError(f'Environment variable {var_name} is missing from the .env file.')
 
 IS_CARD_DISTRIBUTION_ENABLED = False
+CARD_DISTRIBUTION_EMAIL_BATCH_SIZE = 20
 AUTH_COOKIE_NAME = 'esds_apps_auth'
 AUTH_COOKIE_TIMEOUT_SECONDS = 24 * 60 * 60
 AUTH_MAX_LOGIN_ATTEMPTS = 10
