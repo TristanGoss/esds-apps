@@ -28,6 +28,11 @@ async def fetch_membership_cards(additional_params: Optional[Dict] = None) -> Li
 
     # parse the output to extract the bits we care about
     card_data = response.json()['data']
+
+    # return early if no results
+    if len(card_data) == 0:
+        return []
+
     member_data = [x for x in response.json()['included'] if x['type'] == 'members']
     cards = []
 
@@ -68,6 +73,11 @@ async def fetch_membership_card_checks(additional_params: Optional[Dict] = None)
 
     # parse the output to extract the bits we care about
     check_data = response.json()['data']
+
+    # return early if no results
+    if len(check_data) == 0:
+        return []
+
     membership_card_data = [x for x in response.json()['included'] if x['type'] == 'membership-cards']
     member_data = [x for x in response.json()['included'] if x['type'] == 'members']
     checks = []
