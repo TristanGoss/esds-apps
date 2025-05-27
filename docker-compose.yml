@@ -12,10 +12,12 @@ services:
     image: nginx:stable
     container_name: nginx
     ports:
+      - "80:80"
       - "443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d:ro
       - ./nginx/backend-common.conf:/etc/nginx/includes/backend-common.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/mnt/certbot_webroot:ro
     depends_on:
       - esds-apps

@@ -8,6 +8,11 @@ The first use of this repository is the provision of an add-on for dancecloud.co
 ## Secrets
 Some settings are not present in config.py, and instead need to be provided by creating a `.env` file in the repository after it has been checked out. If you are planning to develop this code further and would like some relevant values for these settings, please email info@esds.org.uk to request them.
 
+## https
+Note that https certificates are intended to be managed using certbot, so the docker-compose.yml mounts them from /etc/letsencrypt
+https certificate renewal should be via the webroot method, using `/var/www/certbot` as the webroot path;
+this will need to be manually configured after deployment by editing `/etc/letsencrypt/renewal/apps.esds.org.uk`.
+
 ## Service install
 It's useful to install this repo as a systemd service:
 ```bash
