@@ -4,12 +4,29 @@
   position: relative;
   width: 90vw;
   max-width: 600px;
-  aspect-ratio: 1 / 1; /* makes it square */
+  aspect-ratio: 1 / 1;
+  margin-bottom: 0;
 }
 
-#qr-reader {
+#result {
+  margin-top: 0.5rem;
+  position: relative;
+  z-index: 1;
+}
+
+#qr-reader * {
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
+  position: relative;
+  z-index: 5;
+}
+
+#qr-reader video {
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover; /* fill area without distortion */
+  display: block;
 }
 
 .flash-green {
