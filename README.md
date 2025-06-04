@@ -24,6 +24,13 @@ sudo systemctl start esds-apps.service
 ```
 
 ## Development setup
+### cairosvg
+Note that this software uses cairosvg, and so needs to install some non-python dependencies. If using Linux, these are clearly recorded in the Dockerfile, and you can simply follow the steps there to set up a dev environment. If on windows, things are more tricky.
+
+To install cairosvg on windows, first download the GTK 3 Windows runtime from:
+https://github.com/tschoonj/GTK-for-Windows-Runtime-Environment-Installer/releases. Make sure you add to path when installing.
+
+### Linting
 We use Ruff for linting. When developing, please install the pre-commit hooks after installing the package:
 ```bash
 poetry install
