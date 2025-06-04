@@ -10,13 +10,3 @@ a {
     color: #007bff;
     text-decoration: none;
 }
-
-.flash-green {
-    background-color: limegreen;
-    transition: background-color 0.3s ease;
-}
-
-.flash-red {
-    background-color: crimson;
-    transition: background-color 0.3s ease;
-}

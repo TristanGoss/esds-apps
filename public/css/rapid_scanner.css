@@ -1,0 +1,52 @@
+@import url("base.css");
+
+#scanner-container {
+  position: relative;
+  width: 90vw;
+  max-width: 600px;
+  aspect-ratio: 1 / 1; /* makes it square */
+}
+
+#qr-reader {
+  width: 100%;
+  height: 100%;
+}
+
+.flash-green {
+    background-color: limegreen;
+    transition: background-color 0.3s ease;
+}
+
+.flash-red {
+    background-color: crimson;
+    transition: background-color 0.3s ease;
+}
+
+.help-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.9);
+  color: black;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-end;
+  font-size: 1.2rem;
+  z-index: 10;
+  text-align: left;
+  padding: 1rem;
+  box-sizing: border-box;
+  transition: opacity 0.3s ease;
+}
+
+.help-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.help-overlay p {
+  margin: 0.5em 0;
+}
