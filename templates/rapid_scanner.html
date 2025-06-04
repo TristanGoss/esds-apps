@@ -11,15 +11,18 @@
       margin-top: 1em;
     }
   </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
 <body>
-  <h1>Rapid Membership card scanner</h1>
-  <p>
-    You can use this page to rapidly validate a large number of membership cards. Simply aim your camera at them and listen for the response.
-  </p>
-  <div id="reader" style="width: 100%; max-width: 1000px;"></div>
-  <div id="result"></div>
-
+  <div id="all">
+    <h1>Rapid Membership card scanner</h1>
+    <p>
+      You can use this page to rapidly validate a large number of membership cards. Simply aim your camera at them and listen for the response.<br>
+      If the scanner does not work reliably, please do not tap or refresh the page. Instead, ensure you have a stable internet connection.
+    </p>
+    <div id="reader" style="width: 100%; max-width: 1000px;"></div>
+    <div id="result"></div>
+  </div>
   <script src="/public/js/card_scanner.js"></script>
 </body>
 </html>
