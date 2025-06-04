@@ -1,5 +1,10 @@
 @import url("base.css");
 
+#all {
+  padding: 0 1rem;
+  box-sizing: border-box;
+}
+
 #scanner-container {
   position: relative;
   width: 100vw;
@@ -9,8 +14,9 @@
 }
 
 #result {
-  margin-top: 0.5rem;
+  margin-top: 1em;
   position: relative;
+  font-size: 2em;
   z-index: 1;
 }
 
