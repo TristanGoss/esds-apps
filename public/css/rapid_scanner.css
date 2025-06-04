@@ -7,10 +7,10 @@
 
 #scanner-container {
   position: relative;
-  width: calc(100vw - 2rem);  /* allow for 1rem border */
+  width: 100%;
   max-width: 800px;
   aspect-ratio: 1 / 1;
-  margin-bottom: 0;
+  box-sizing: border-box;
 }
 
 #result {
