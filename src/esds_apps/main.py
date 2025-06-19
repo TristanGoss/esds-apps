@@ -104,19 +104,33 @@ async def proxy_card_check(url: str):
 @app.get('/membership-cards/checks/logs', response_class=HTMLResponse)
 async def card_scanning_log(request: Request, _: None = Depends(require_valid_cookie)):
     card_checks = await fetch_membership_card_checks()
+    checks_in_the_last_30_days = [
+        check
+        for check in card_checks
+        if check.checked_at > datetime.now(pytz.timezone('Europe/London')) - timedelta(days=30)
+    ]
+
+    # for easy checking of how many members have turned up to a class / AGM,
+    # report the number of unique cards scanned in the past hour.
+    unique_card_uuids_scanned_in_the_last_hour = set()
+    unique_checks_in_the_last_hour = []
+    for check in checks_in_the_last_30_days:
+        if (
+            check.checked_at > datetime.now(pytz.timezone('Europe/London')) - timedelta(hours=1)
+        ) and check.card_uuid not in unique_card_uuids_scanned_in_the_last_hour:
+            unique_card_uuids_scanned_in_the_last_hour.add(check.card_uuid)
+            unique_checks_in_the_last_hour.append(check)
+
     return config.TEMPLATES.TemplateResponse(
         request,
         'check_logs.html',
         {
+            'num_unique_checks_in_last_hour': len(unique_checks_in_the_last_hour),
             'checks': sorted(
-                [
-                    check
-                    for check in card_checks
-                    if check.checked_at > datetime.now(pytz.timezone('Europe/London')) - timedelta(days=30)
-                ],
+                checks_in_the_last_30_days,
                 reverse=True,
                 key=lambda x: x.checked_at,
-            )
+            ),
         },
     )
 
