@@ -30,8 +30,11 @@ document.addEventListener("click", () => {
   scanner.start(
     { facingMode: "environment" },
     {
-      fps: 10,
-      qrbox: { width: 1000, height: 1000 }
+      fps: 15,
+      qrbox: { width: 1000, height: 1000 },
+      experimentalFeatures: {
+        useBarCodeDetectorIfSupported: true
+      },
     },
     (decodedText, decodedResult) => {
       if (!readyForScan || decodedText === lastDecodedText) return;
