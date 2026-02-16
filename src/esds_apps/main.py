@@ -95,8 +95,9 @@ async def door_volunteers(request: Request):
 
 @app.post('/door-volunteers/add', response_class=RedirectResponse)
 async def add_volunteer(request: Request, _: None = Depends(require_valid_cookie)):
-    # remove the door volunteer from the group
-    await add_door_volunteer(request.json()['volunteer_email'])
+    # add the door volunteer to the group
+    data = await request.json()
+    await add_door_volunteer(data['volunteer_email'])
 
     # Redirect back to the table view
     return RedirectResponse(url='/door-volunteers', status_code=303)
