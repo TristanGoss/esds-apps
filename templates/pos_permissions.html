@@ -13,7 +13,7 @@
         We add Door Volunteers and Safer Spaces Volunteers here rather than giving them Dancecloud organiser access in order to reduce their access to PII
         and to prevent them from arbitrarily creating, editing and deleting dancecloud events.
     </p>
-    <form id="door-volunteer-form">
+    <form id="pos-permissions-form">
         <label for="add-via-email">Add via email:</label>
         <input type="text" id="add-via-email" placeholder="e.g. john.doe@mail.com">
         <button type="button"
@@ -55,7 +55,7 @@
             </tbody>
         </table>
     </form>
-    <script src="/public/js/door_volunteers.js"></script>
+    <script src="/public/js/pos_permissions.js"></script>
     <script>
     // Enable Add button only when input is not empty
     const addInput = document.getElementById('add-via-email');

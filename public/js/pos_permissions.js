@@ -24,9 +24,9 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 
 
-// Submit a request to add a volunteer to the group
+// Submit a request to give a volunteer access to pos.dancecloud.com
 function submitAdd(volunteer_email) {
-    fetch('/door-volunteers/add', {
+    fetch('/pos-permissions/add', {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -48,14 +48,14 @@ function submitAdd(volunteer_email) {
 }
 
 
-// Submit a request to remove a volunteer from the group
+// Submit a request to remove Dancecloud POS permissions from a volunteer
 function submitRemove(volunteerUuid, volunteerFirstName) {
-    const confirmMsg = `Are you sure you want to remove ${volunteerFirstName} from the Door Volunteers group? They will no longer be able to access pos.dancecloud.com`;
+    const confirmMsg = `Are you sure you want to remove Dancecloud POS permissions from ${volunteerFirstName}?`;
     const confirmed = window.confirm(confirmMsg);
 
     if (!confirmed) return;
 
-    fetch(`/door-volunteers/${volunteerUuid}/remove`, {
+    fetch(`/pos-permissions/${volunteerUuid}/remove`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',

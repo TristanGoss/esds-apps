@@ -20,12 +20,12 @@ from esds_apps import config
 from esds_apps.auth import password_auth, require_valid_cookie
 from esds_apps.classes import MembershipCardStatus, PrintablePdfError
 from esds_apps.dancecloud_interface import (
-    add_door_volunteer,
-    fetch_door_volunteers,
+    add_pos_permissions,
     fetch_membership_card_checks,
     fetch_membership_cards,
+    fetch_pos_permissions,
     reissue_membership_card,
-    remove_door_volunteer,
+    remove_pos_permissions,
     set_membership_card_status,
 )
 from esds_apps.membership_cards import auto_issue_unissued_cards, generate_card_front_png, printable_pdf
@@ -85,31 +85,31 @@ async def membership_cards(request: Request):
     )
 
 
-@app.api_route('/door-volunteers', methods=['GET', 'POST'], response_class=HTMLResponse)
+@app.api_route('/pos-permissions', methods=['GET', 'POST'], response_class=HTMLResponse)
 @password_auth
-async def door_volunteers(request: Request):
+async def pos_permissions(request: Request):
     return config.TEMPLATES.TemplateResponse(
-        request, 'door_volunteers.html', {'volunteers': await fetch_door_volunteers()}
+        request, 'pos_permissions.html', {'volunteers': await fetch_pos_permissions()}
     )
 
 
-@app.post('/door-volunteers/add', response_class=RedirectResponse)
+@app.post('/pos-permissions/add', response_class=RedirectResponse)
 async def add_volunteer(request: Request, _: None = Depends(require_valid_cookie)):
-    # add the door volunteer to the group
+    # add POS permissions to a volunteer
     data = await request.json()
-    await add_door_volunteer(data['volunteer_email'])
+    await add_pos_permissions(data['volunteer_email'])
 
     # Redirect back to the table view
-    return RedirectResponse(url='/door-volunteers', status_code=303)
+    return RedirectResponse(url='/pos-permissions', status_code=303)
 
 
-@app.post('/door-volunteers/{volunteer_uuid}/remove', response_class=RedirectResponse)
+@app.post('/pos-permissions/{volunteer_uuid}/remove', response_class=RedirectResponse)
 async def remove_volunteer(request: Request, volunteer_uuid: str, _: None = Depends(require_valid_cookie)):
-    # remove the door volunteer from the group
-    await remove_door_volunteer(volunteer_uuid)
+    # remove POS permissions from a volunteer
+    await remove_pos_permissions(volunteer_uuid)
 
     # Redirect back to the table view
-    return RedirectResponse(url='/door-volunteers', status_code=303)
+    return RedirectResponse(url='/pos-permissions', status_code=303)
 
 
 @app.get('/membership-cards/scanner', response_class=HTMLResponse)

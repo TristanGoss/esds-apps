@@ -136,8 +136,8 @@ async def reissue_membership_card(card_uuid: str, reason: MembershipCardStatus) 
     log.debug(f'Asked Dancecloud to reissue membership card with ID {card_uuid} because it was {reason}.')
 
 
-async def fetch_door_volunteers() -> List[DoorVolunteer]:
-    log.debug('Polling Dancecloud for door volunteers...')
+async def fetch_pos_permissions() -> List[DoorVolunteer]:
+    log.debug('Polling Dancecloud for POS permissions...')
 
     async with httpx.AsyncClient() as client:
         response = await client.get(
@@ -166,12 +166,12 @@ async def fetch_door_volunteers() -> List[DoorVolunteer]:
             )
         )
 
-    log.debug(f'Found {len(volunteers)} door volunteers.')
+    log.debug(f'Found {len(volunteers)} people with POS permissions.')
 
     return volunteers
 
 
-async def add_door_volunteer(volunteer_email: str) -> None:
+async def add_pos_permissions(volunteer_email: str) -> None:
     async with httpx.AsyncClient() as client:
         response = await client.post(
             f'{config.DC_HOST}/{config.DC_API_PATH}/team-members/',
@@ -189,7 +189,7 @@ async def add_door_volunteer(volunteer_email: str) -> None:
     response.raise_for_status()
 
 
-async def remove_door_volunteer(volunteer_uuid: str) -> None:
+async def remove_pos_permissions(volunteer_uuid: str) -> None:
     async with httpx.AsyncClient() as client:
         response = await client.delete(
             f'{config.DC_HOST}/{config.DC_API_PATH}/team-members/{volunteer_uuid}', headers=config.DC_PATCH_HEADERS
