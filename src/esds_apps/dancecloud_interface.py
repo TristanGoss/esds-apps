@@ -141,7 +141,7 @@ async def fetch_door_volunteers() -> List[DoorVolunteer]:
 
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            f'{config.DC_HOST}/{config.DC_API_PATH}/teams/{config.DOOR_VOLUNTEERS_TEAM_ID}/members',
+            f'{config.DC_HOST}/{config.DC_API_PATH}/teams/{config.SECRETS["DOOR_VOLUNTEERS_TEAM_ID"]}/members',
             headers=config.DC_GET_HEADERS,
         )
     response.raise_for_status()
@@ -180,7 +180,9 @@ async def add_door_volunteer(volunteer_email: str) -> None:
                 'data': {
                     'type': 'team-members',
                     'attributes': {'email': volunteer_email},
-                    'relationships': {'team': {'data': {'type': 'teams', 'id': config.DOOR_VOLUNTEERS_TEAM_ID}}},
+                    'relationships': {
+                        'team': {'data': {'type': 'teams', 'id': config.SECRETS['DOOR_VOLUNTEERS_TEAM_ID']}}
+                    },
                 }
             },
         )
