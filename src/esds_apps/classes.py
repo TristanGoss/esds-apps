@@ -31,6 +31,7 @@ class _MembershipCommon(_Person):
 @dataclass(frozen=True)
 class DoorVolunteer(_Person):
     volunteer_uuid: str
+    email: str
 
 
 @dataclass(frozen=True)
