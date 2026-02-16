@@ -16,7 +16,7 @@ document.addEventListener("DOMContentLoaded", function () {
         const filterValue = input.value.toLowerCase().trim();
 
         rows.forEach(row => {
-            const firstNameCell = row.cells[2];  // First name is in the 3rd column
+            const firstNameCell = row.cells[0];  // First name is in the 1st column
             const firstName = firstNameCell.textContent.toLowerCase();
             row.style.display = firstName.includes(filterValue) ? "" : "none";
         });
