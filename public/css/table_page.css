@@ -45,6 +45,11 @@ input[type="checkbox"] {
     margin-left: 1rem;
 }
 
+#filter-first-name {
+    margin-bottom: 1rem;
+    margin-left: 1rem;
+}
+
 #reissue-form {
     display: flex;
     gap: 0.5rem;
