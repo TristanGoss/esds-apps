@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>QR Code Generator</title>
+    <link rel="stylesheet" href="/public/css/base.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+    <h1>QR Code Generator</h1>
+    <form id="qr-form" method="post">
+        <label for="qr-text">Enter text to encode:</label><br>
+        <input type="text" id="qr-text" name="qr_text" style="width: 300px;" required><br><br>
+        <button type="submit" name="format" value="svg">Download SVG</button>
+        <button type="submit" name="format" value="png">Download PNG</button>
+    </form>
+    <p><a href="/">Back to landing page</a></p>
+</body>
+</html>

@@ -11,6 +11,7 @@ from typing import List
 
 import httpx
 import pytz
+import segno
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
@@ -322,3 +323,38 @@ async def download_selected_cards(  # noqa: PLR0913
         media_type='application/pdf',
         headers={'Content-Disposition': 'attachment; filename=esds_membership_cards.pdf'},
     )
+
+
+# QR code generator page
+@app.api_route('/qr-code', methods=['GET', 'POST'], response_class=HTMLResponse)
+async def qr_code_generator(request: Request):
+    if request.method == 'GET':
+        return config.TEMPLATES.TemplateResponse('qr_code.html', {'request': request})
+
+    form = await request.form()
+    qr_text = form.get('qr_text', '').strip()
+    fmt = form.get('format', 'svg').lower()
+    if not qr_text:
+        return config.TEMPLATES.TemplateResponse('qr_code.html', {'request': request, 'error': 'Please enter text.'})
+
+    qr = segno.make(qr_text)
+    if fmt == 'svg':
+        buf = io.BytesIO()
+        qr.save(buf, kind='svg')
+        buf.seek(0)
+        return Response(
+            content=buf.read(),
+            media_type='image/svg+xml',
+            headers={'Content-Disposition': 'attachment; filename="qr_code.svg"'},
+        )
+    elif fmt == 'png':
+        buf = io.BytesIO()
+        qr.save(buf, kind='png', scale=8)
+        buf.seek(0)
+        return Response(
+            content=buf.read(),
+            media_type='image/png',
+            headers={'Content-Disposition': 'attachment; filename="qr_code.png"'},
+        )
+    else:
+        return config.TEMPLATES.TemplateResponse('qr_code.html', {'request': request, 'error': 'Invalid format.'})
