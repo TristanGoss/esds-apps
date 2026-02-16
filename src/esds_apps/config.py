@@ -9,7 +9,7 @@ LOGGING_LEVEL = logging.DEBUG
 CACHE_ROOT = '/tmp/esds_cache'
 
 SECRETS = dotenv_values('.env')
-for var_name in ['DC_API_TOKEN', 'GMAIL_APP_PASSWORD', 'UI_PASSWORD', 'PASS2U_API_KEY']:
+for var_name in ['DC_API_TOKEN', 'GMAIL_APP_PASSWORD', 'UI_PASSWORD', 'PASS2U_API_KEY', 'DOOR_VOLUNTEERS_TEAM_ID']:
     if var_name not in SECRETS:
         raise RuntimeError(f'Environment variable {var_name} is missing from the .env file.')
 

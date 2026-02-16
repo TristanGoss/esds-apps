@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>ESDS Door Volunteers</title>
+    <link rel="icon" href="/public/favicon.ico">
+    <link rel="stylesheet" href="/public/css/membership_cards.css">
+</head>
+<body>
+    <h1>Door Volunteers management</h1>
+    <p>Welcome to the Door Volunteers management page. Here, you can add and remove Door Volunteers to the group of people
+        who are allowed to use  <a href="pos.dancecloud.com" target="_blank">pos.dancecloud.com</a> without having an ESDS organiser account.
+    </p>
+    <form id="door-volunteer-form">
+        <label for="add-via-email">Add via email:</label>
+        <input type="text" id="add-via-email" placeholder="e.g. john.doe@mail.com">
+        <button type="button"
+                id="add-volunteer-btn"
+                class="action-button"
+                disabled>
+            Add volunteer
+        </button>
+        <label for="filter-first-name">Filter by First Name:</label>
+        <input type="text" id="filter-first-name" placeholder="e.g. Alice">
+        <table>
+            <thead>
+                <tr>
+                    <th>First Name</th>
+                    <th>Last Name</th>
+                    <th>Email</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for volunteer in volunteers %}
+                <tr>
+                    <td>{{ volunteer.first_name }}</td>
+                    <td>{{ volunteer.last_name }}</td>
+                    <td>{{ volunteer.email }}</td>
+                    <td class="action-cell">
+                        <div class="action-group">
+                            <button type="button"
+                                    id="remove-btn-{{ volunteer.volunteer_uuid }}"
+                                    onclick="submitRemove('{{ volunteer.volunteer_uuid }}', '{{ volunteer.first_name }}')"
+                                    class="action-button">
+                                Remove
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </form>
+    <script src="/public/js/door_volunteers.js"></script>
+    <script>
+    // Enable Add button only when input is not empty
+    const addInput = document.getElementById('add-via-email');
+    const addBtn = document.getElementById('add-volunteer-btn');
+    addInput.addEventListener('input', function() {
+        addBtn.disabled = !addInput.value.trim();
+    });
+    addBtn.addEventListener('click', function() {
+        submitAdd(addInput.value.trim());
+    });
+    </script>
+</body>
+</html>

@@ -5,7 +5,7 @@ from typing import Dict, List, Optional
 import httpx
 
 from esds_apps import config
-from esds_apps.classes import MembershipCard, MembershipCardCheck, MembershipCardStatus
+from esds_apps.classes import DoorVolunteer, MembershipCard, MembershipCardCheck, MembershipCardStatus
 
 log = logging.getLogger(__name__)
 
@@ -134,3 +134,62 @@ async def reissue_membership_card(card_uuid: str, reason: MembershipCardStatus) 
         # TODO: Note that as of 1710 1st April, this 404s.
 
     log.debug(f'Asked Dancecloud to reissue membership card with ID {card_uuid} because it was {reason}.')
+
+
+async def fetch_door_volunteers() -> List[DoorVolunteer]:
+    log.debug('Polling Dancecloud for door volunteers...')
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            f'{config.DC_HOST}/{config.DC_API_PATH}/teams/{config.DOOR_VOLUNTEERS_TEAM_ID}/members',
+            headers=config.DC_GET_HEADERS,
+        )
+    response.raise_for_status()
+
+    # parse the output to extract the bits we care about
+    volunteer_data = response.json()['data']
+
+    # return early if no results
+    if len(volunteer_data) == 0:
+        return []
+
+    volunteer_data = [x for x in volunteer_data if x['type'] == 'team-members']
+    volunteers = []
+
+    for v in volunteer_data:
+        volunteers.append(
+            DoorVolunteer(
+                volunteer_uuid=v['id'],
+                first_name=v['attributes']['firstName'],
+                last_name=v['attributes']['lastName'],
+                email=v['attributes']['email'],
+            )
+        )
+
+    log.debug(f'Found {len(volunteers)} door volunteers.')
+
+    return volunteers
+
+
+async def add_door_volunteer(volunteer_email: str) -> None:
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            f'{config.DC_HOST}/{config.DC_API_PATH}/team-members/',
+            headers=config.DC_PATCH_HEADERS,
+            json={
+                'data': {
+                    'type': 'team-members',
+                    'attributes': {'email': volunteer_email},
+                    'relationships': {'team': {'data': {'type': 'teams', 'id': config.DOOR_VOLUNTEERS_TEAM_ID}}},
+                }
+            },
+        )
+    response.raise_for_status()
+
+
+async def remove_door_volunteer(volunteer_uuid: str) -> None:
+    async with httpx.AsyncClient() as client:
+        response = await client.delete(
+            f'{config.DC_HOST}/{config.DC_API_PATH}/team-members/{volunteer_uuid}', headers=config.DC_PATCH_HEADERS
+        )
+    response.raise_for_status()

@@ -20,9 +20,12 @@ from esds_apps import config
 from esds_apps.auth import password_auth, require_valid_cookie
 from esds_apps.classes import MembershipCardStatus, PrintablePdfError
 from esds_apps.dancecloud_interface import (
+    add_door_volunteer,
+    fetch_door_volunteers,
     fetch_membership_card_checks,
     fetch_membership_cards,
     reissue_membership_card,
+    remove_door_volunteer,
     set_membership_card_status,
 )
 from esds_apps.membership_cards import auto_issue_unissued_cards, generate_card_front_png, printable_pdf
@@ -80,6 +83,32 @@ async def membership_cards(request: Request):
     return config.TEMPLATES.TemplateResponse(
         request, 'membership_cards.html', {'cards': await fetch_membership_cards()}
     )
+
+
+@app.api_route('/door-volunteers', methods=['GET', 'POST'], response_class=HTMLResponse)
+@password_auth
+async def door_volunteers(request: Request):
+    return config.TEMPLATES.TemplateResponse(
+        request, 'door_volunteers.html', {'volunteers': await fetch_door_volunteers()}
+    )
+
+
+@app.post('/door-volunteers/add', response_class=RedirectResponse)
+async def add_volunteer(request: Request, _: None = Depends(require_valid_cookie)):
+    # remove the door volunteer from the group
+    await add_door_volunteer(request.json()['volunteer_email'])
+
+    # Redirect back to the table view
+    return RedirectResponse(url='/door-volunteers', status_code=303)
+
+
+@app.post('/door-volunteers/{volunteer_uuid}/remove', response_class=RedirectResponse)
+async def remove_volunteer(request: Request, volunteer_uuid: str, _: None = Depends(require_valid_cookie)):
+    # remove the door volunteer from the group
+    await remove_door_volunteer(volunteer_uuid)
+
+    # Redirect back to the table view
+    return RedirectResponse(url='/door-volunteers', status_code=303)
 
 
 @app.get('/membership-cards/scanner', response_class=HTMLResponse)
@@ -179,7 +208,7 @@ async def reissue_card(
     log.info(f'Reissued card with UUID {card_uuid} because it was {reason}')
 
     # Redirect back to the table view
-    return RedirectResponse(url='/membership_cards', status_code=303)
+    return RedirectResponse(url='/membership-cards', status_code=303)
 
 
 @app.post('/membership-cards/{card_uuid}/cancel', response_class=RedirectResponse)
@@ -197,7 +226,7 @@ async def cancel_card(request: Request, card_uuid: str, _: None = Depends(requir
     log.info(f'Cancelled card with UUID {card_uuid}')
 
     # Redirect back to the table view
-    return RedirectResponse(url='/membership_cards', status_code=303)
+    return RedirectResponse(url='/membership-cards', status_code=303)
 
 
 @app.get('/membership-cards/{card_number}/card-front.png', response_class=Response)

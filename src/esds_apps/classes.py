@@ -16,12 +16,21 @@ class MembershipCardStatus(StrEnum):
 
 
 @dataclass(frozen=True)
-class _MembershipCommon:
+class _Person:
+    first_name: str
+    last_name: str
+
+
+@dataclass(frozen=True)
+class _MembershipCommon(_Person):
     card_uuid: str
     member_uuid: str
     card_number: int
-    first_name: str
-    last_name: str
+
+
+@dataclass(frozen=True)
+class DoorVolunteer(_Person):
+    volunteer_uuid: str
 
 
 @dataclass(frozen=True)
