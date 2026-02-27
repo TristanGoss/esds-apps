@@ -3,13 +3,14 @@ import os
 import sqlite3
 from typing import Dict, List, Optional
 
-DB_PATH = os.path.join(os.path.dirname(__file__), '../../working/qr_codes.db')
-SCHEMA_PATH = os.path.join(os.path.dirname(__file__), '../../working/qr_codes_schema.sql')
+from esds_apps import config
+
+SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'qr_codes_schema.sql')
 
 
 class QRCodeDB:
-    def __init__(self, db_path: Optional[str] = None):
-        self.db_path = db_path or DB_PATH
+    def __init__(self, db_path: Optional[str] = config.DB_PATH):
+        self.db_path = db_path
         self._ensure_schema()
 
     def _ensure_schema(self):

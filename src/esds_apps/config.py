@@ -8,6 +8,7 @@ LOGGING_LEVEL = logging.DEBUG
 
 CACHE_ROOT = '/tmp/esds_cache'
 BASE_URL = 'https://apps.esds.org.uk'
+DB_PATH = CACHE_ROOT + '/qr_codes.db'
 
 SECRETS = dotenv_values('.env')
 for var_name in ['DC_API_TOKEN', 'GMAIL_APP_PASSWORD', 'UI_PASSWORD', 'PASS2U_API_KEY', 'DOOR_VOLUNTEERS_TEAM_ID']:
