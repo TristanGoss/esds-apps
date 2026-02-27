@@ -59,6 +59,7 @@ class QRCodeDB:
         """Delete a QR code entry by its code_id."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute('DELETE FROM qr_codes WHERE code_id = ?', (code_id,))
+            conn.execute('DELETE FROM qr_code_scans WHERE code_id = ?', (code_id,))
             conn.commit()
 
     def _row_to_dict(self, cur, row):
