@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from http import HTTPStatus
 from typing import Dict, List, Optional
 
 import httpx
@@ -18,13 +19,24 @@ async def fetch_membership_cards(additional_params: Optional[Dict] = None) -> Li
     if additional_params is not None:
         params.update(additional_params)
 
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f'{config.DC_HOST}/{config.DC_API_PATH}/membership-cards',
-            headers=config.DC_GET_HEADERS,
-            params=params,
-        )
-    response.raise_for_status()
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f'{config.DC_HOST}/{config.DC_API_PATH}/membership-cards',
+                headers=config.DC_GET_HEADERS,
+                params=params,
+            )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == HTTPStatus.UNAUTHORIZED:
+            log.error('Dancecloud API returned 401 Unauthorized when fetching membership cards. Check credentials.')
+            return []
+        else:
+            log.error(f'Error fetching membership cards: {e}')
+            return []
+    except Exception as e:
+        log.error(f'Unexpected error fetching membership cards: {e}')
+        return []
 
     # parse the output to extract the bits we care about
     card_data = response.json()['data']

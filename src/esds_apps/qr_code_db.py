@@ -27,10 +27,17 @@ class QRCodeDB:
             conn.commit()
 
     def increment_scan(self, code_id: str):
-        """Increment the scan count for a QR code."""
+        """Increment the scan count and log the scan datetime for a QR code."""
         with sqlite3.connect(self.db_path) as conn:
             conn.execute('UPDATE qr_codes SET scan_count = scan_count + 1 WHERE code_id = ?', (code_id,))
+            conn.execute('INSERT INTO qr_code_scans (code_id, scanned_at) VALUES (?, CURRENT_TIMESTAMP)', (code_id,))
             conn.commit()
+
+    def get_scan_datetimes(self, code_id: str) -> List[str]:
+        """Return a list of scan datetimes (UTC ISO format) for a QR code."""
+        with sqlite3.connect(self.db_path) as conn:
+            cur = conn.execute('SELECT scanned_at FROM qr_code_scans WHERE code_id = ? ORDER BY scanned_at', (code_id,))
+            return [row[0] for row in cur.fetchall()]
 
     def get_qr_code(self, code_id: str) -> Optional[Dict]:
         """Retrieve a QR code entry by its code_id."""

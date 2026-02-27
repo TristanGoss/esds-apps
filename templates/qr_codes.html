@@ -8,7 +8,9 @@
 <body>
         <h2>Tracked QR Codes</h2>
         <p>
-            Welcome to the Tracked QR Code management page. Here, you can create QR codes that redirect to any URL and count how many times each code is scanned. Each QR code has a description to remind you of its purpose. You can download each code as SVG or PNG, and see the scan statistics in the table below.
+            Welcome to the Tracked QR Code management page. Here, you can create QR codes that redirect to any URL and count how many times each code is scanned.
+            Each QR code has a description to remind you of its purpose. You can download each code as SVG or PNG, and see the scan statistics in the table below.
+            Click on the scan count to download a .csv of the times at which the code was scanned.
         </p>
         <form method="post" style="margin-bottom: 2em;">
             <fieldset style="border: 1px solid #ccc; padding: 1em; max-width: 600px;">
@@ -40,7 +42,9 @@
             <tr>
                 <td>{{ qr.description }}</td>
                 <td><a href="{{ qr.target_url }}" target="_blank">{{ qr.target_url }}</a></td>
-                <td>{{ qr.scan_count }}</td>
+                <td>
+                    <a href="/qr-codes/{{ qr.code_id }}/scans.csv" title="Scan Times">{{ qr.scan_count }}</a>
+                </td>
                 <td>
                     <a href="/qr-codes/{{ qr.code_id }}/qr.svg" target="_blank">SVG</a>
                     |

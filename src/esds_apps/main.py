@@ -394,7 +394,7 @@ async def serve_tracked_qr_code(request: Request, code_id: str, fmt: str):
         return Response('Invalid format', status_code=400)
 
 
-# Redirection endpoint that counts scans
+# Redirection endpoint that counts scans - this is the URL the qr codes target
 @app.get('/s/{code_id}')
 async def tracked_qr_scan(code_id: str):
     qr_info = qr_db.get_qr_code(code_id)
@@ -402,3 +402,30 @@ async def tracked_qr_scan(code_id: str):
         return Response('QR code not found', status_code=404)
     qr_db.increment_scan(code_id)
     return RedirectResponse(qr_info['target_url'], status_code=302)
+
+
+# Download scan datetimes as CSV for a QR code
+@app.get('/qr-codes/{code_id}/scans.csv')
+@password_auth
+async def download_qr_code_scans_csv(request: Request, code_id: str):
+    qr_info = qr_db.get_qr_code(code_id)
+    if not qr_info:
+        return Response('QR code not found', status_code=404)
+    scan_datetimes = qr_db.get_scan_datetimes(code_id)
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(['scanned_at_utc'])
+    for dt in scan_datetimes:
+        # Ensure ISO 8601 format (with timezone if present)
+        if hasattr(dt, 'isoformat'):
+            writer.writerow([dt.isoformat()])
+        else:
+            writer.writerow([str(dt)])
+    buf.seek(0)
+    desc = qr_info.get('description') or code_id
+    safe_desc = desc.replace(' ', '_')
+    return Response(
+        content=buf.read(),
+        media_type='text/csv',
+        headers={'Content-Disposition': f'attachment; filename="{safe_desc}_scans.csv"'},
+    )
