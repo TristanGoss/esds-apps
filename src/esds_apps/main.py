@@ -331,6 +331,7 @@ async def download_selected_cards(  # noqa: PLR0913
 
 # Management UI for tracked QR codes (with creation form)
 @app.api_route('/qr-codes', methods=['GET', 'POST'], response_class=HTMLResponse)
+@password_auth
 async def qr_codes_table(request: Request):
     error = None
     if request.method == 'POST':
@@ -362,35 +363,39 @@ async def qr_codes_table(request: Request):
 
 # Endpoint to serve the QR code image (SVG or PNG)
 @app.get('/qr-codes/{code_id}/qr.{fmt}')
-async def serve_tracked_qr_code(code_id: str, fmt: str):
+@password_auth
+async def serve_tracked_qr_code(request: Request, code_id: str, fmt: str):
     qr_info = qr_db.get_qr_code(code_id)
     if not qr_info:
         return Response('QR code not found', status_code=404)
-    qr_url = f'{config.BASE_URL}/qr-codes/{code_id}/scan'
+    qr_url = f'{config.BASE_URL}/s/{code_id}'
     qr = segno.make(qr_url)
     buf = io.BytesIO()
+    # Use description for filename, fallback to code_id
+    desc = qr_info.get('description') or code_id
+    safe_desc = desc.replace(' ', '_')
     if fmt == 'svg':
-        qr.save(buf, kind='svg')
+        qr.save(buf, kind='svg', scale=4)
         buf.seek(0)
         return Response(
             content=buf.read(),
             media_type='image/svg+xml',
-            headers={'Content-Disposition': f'attachment; filename="{code_id}.svg"'},
+            headers={'Content-Disposition': f'attachment; filename="{safe_desc}.svg"'},
         )
     elif fmt == 'png':
-        qr.save(buf, kind='png', scale=8)
+        qr.save(buf, kind='png', scale=32)
         buf.seek(0)
         return Response(
             content=buf.read(),
             media_type='image/png',
-            headers={'Content-Disposition': f'attachment; filename="{code_id}.png"'},
+            headers={'Content-Disposition': f'attachment; filename="{safe_desc}.png"'},
         )
     else:
         return Response('Invalid format', status_code=400)
 
 
 # Redirection endpoint that counts scans
-@app.get('/qr-codes/{code_id}/scan')
+@app.get('/s/{code_id}')
 async def tracked_qr_scan(code_id: str):
     qr_info = qr_db.get_qr_code(code_id)
     if not qr_info:

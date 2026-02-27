@@ -11,24 +11,27 @@
             Welcome to the Tracked QR Code management page. Here, you can create QR codes that redirect to any URL and count how many times each code is scanned. Each QR code has a description to remind you of its purpose. You can download each code as SVG or PNG, and see the scan statistics in the table below.
         </p>
         <form method="post" style="margin-bottom: 2em;">
-                <fieldset style="border: 1px solid #ccc; padding: 1em; max-width: 600px;">
-                        <legend><b>Create a New QR Code</b></legend>
-                        <label for="target_url">Target URL:</label><br>
-                        <input type="url" id="target_url" name="target_url" required style="width: 400px;"><br><br>
+            <fieldset style="border: 1px solid #ccc; padding: 1em; max-width: 600px;">
+                <legend><b>Create a New QR Code</b></legend>
+                <label for="target_url">Target URL:</label><br>
+                <input type="url" id="target_url" name="target_url" required style="width: 400px;"><br><br>
                         <label for="description">Description:</label><br>
-                        <input type="text" id="description" name="description" maxlength="1024" style="width: 400px;"><br><br>
-                        <button type="submit">Create QR Code</button>
-                        {% if error %}<p style="color: red;">{{ error }}</p>{% endif %}
-                </fieldset>
+                        <input type="text" id="description" name="description" maxlength="1024" style="width: 400px;" required pattern=".*\S.*" title="Description cannot be empty or just spaces."><br><br>
+                <button type="submit">Create QR Code</button>
+                {% if error %}<p style="color: red;">{{ error }}</p>{% endif %}
+            </fieldset>
         </form>
+        <div style="margin-bottom: 1em;">
+            <label for="filter-description"><b>Filter by Description:</b></label>
+            <input type="text" id="filter-description" placeholder="e.g. event name" style="width: 300px;">
+        </div>
         <table>
         <thead>
             <tr>
                 <th>Description</th>
                 <th>Target URL</th>
                 <th>Scans</th>
-                <th>QR (SVG)</th>
-                <th>QR (PNG)</th>
+                <th>Download</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -38,8 +41,11 @@
                 <td>{{ qr.description }}</td>
                 <td><a href="{{ qr.target_url }}" target="_blank">{{ qr.target_url }}</a></td>
                 <td>{{ qr.scan_count }}</td>
-                <td><a href="/qr-codes/{{ qr.code_id }}/qr.svg" target="_blank">SVG</a></td>
-                <td><a href="/qr-codes/{{ qr.code_id }}/qr.png" target="_blank">PNG</a></td>
+                <td>
+                    <a href="/qr-codes/{{ qr.code_id }}/qr.svg" target="_blank">SVG</a>
+                    |
+                    <a href="/qr-codes/{{ qr.code_id }}/qr.png" target="_blank">PNG</a>
+                </td>
                 <td>
                     <form method="post" style="display:inline;">
                         <input type="hidden" name="delete_code_id" value="{{ qr.code_id }}">
@@ -50,5 +56,8 @@
         {% endfor %}
         </tbody>
     </table>
+</tbody>
+    </table>
+    <script src="/public/js/qr_codes.js"></script>
 </body>
 </html>
