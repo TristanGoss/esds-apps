@@ -2,6 +2,7 @@ import asyncio
 import csv
 import io
 import logging
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timedelta
@@ -35,6 +36,9 @@ from esds_apps.pass2u_interface import (
     create_wallet_pass,
     void_wallet_pass_if_exists,
 )
+from esds_apps.qr_code_db import QRCodeDB
+
+qr_db = QRCodeDB()
 
 logging.basicConfig(
     level=config.LOGGING_LEVEL,
@@ -325,36 +329,71 @@ async def download_selected_cards(  # noqa: PLR0913
     )
 
 
-# QR code generator page
-@app.api_route('/qr-code', methods=['GET', 'POST'], response_class=HTMLResponse)
-async def qr_code_generator(request: Request):
-    if request.method == 'GET':
-        return config.TEMPLATES.TemplateResponse('qr_code.html', {'request': request})
+# Management UI for tracked QR codes (with creation form)
+@app.api_route('/qr-codes', methods=['GET', 'POST'], response_class=HTMLResponse)
+async def qr_codes_table(request: Request):
+    error = None
+    if request.method == 'POST':
+        form = await request.form()
+        # Handle deletion
+        delete_code_id = form.get('delete_code_id')
+        if delete_code_id:
+            qr_db.delete_qr_code(delete_code_id)
+            return RedirectResponse('/qr-codes', status_code=303)
+        # Handle creation
+        target_url = form.get('target_url', '').strip()
+        description = form.get('description', '').strip()
+        if not target_url:
+            error = 'Please enter a target URL.'
+        else:
+            code_id = str(uuid.uuid4())[:8]
+            qr_db.add_qr_code(code_id, target_url, description)
+            return RedirectResponse('/qr-codes', status_code=303)
+    qr_codes = qr_db.list_qr_codes()
+    return config.TEMPLATES.TemplateResponse(
+        'qr_codes.html',
+        {
+            'request': request,
+            'qr_codes': qr_codes,
+            'error': error,
+        },
+    )
 
-    form = await request.form()
-    qr_text = form.get('qr_text', '').strip()
-    fmt = form.get('format', 'svg').lower()
-    if not qr_text:
-        return config.TEMPLATES.TemplateResponse('qr_code.html', {'request': request, 'error': 'Please enter text.'})
 
-    qr = segno.make(qr_text)
+# Endpoint to serve the QR code image (SVG or PNG)
+@app.get('/qr-codes/{code_id}/qr.{fmt}')
+async def serve_tracked_qr_code(code_id: str, fmt: str):
+    qr_info = qr_db.get_qr_code(code_id)
+    if not qr_info:
+        return Response('QR code not found', status_code=404)
+    qr_url = f'{config.BASE_URL}/qr-codes/{code_id}/scan'
+    qr = segno.make(qr_url)
+    buf = io.BytesIO()
     if fmt == 'svg':
-        buf = io.BytesIO()
         qr.save(buf, kind='svg')
         buf.seek(0)
         return Response(
             content=buf.read(),
             media_type='image/svg+xml',
-            headers={'Content-Disposition': 'attachment; filename="qr_code.svg"'},
+            headers={'Content-Disposition': f'attachment; filename="{code_id}.svg"'},
         )
     elif fmt == 'png':
-        buf = io.BytesIO()
         qr.save(buf, kind='png', scale=8)
         buf.seek(0)
         return Response(
             content=buf.read(),
             media_type='image/png',
-            headers={'Content-Disposition': 'attachment; filename="qr_code.png"'},
+            headers={'Content-Disposition': f'attachment; filename="{code_id}.png"'},
         )
     else:
-        return config.TEMPLATES.TemplateResponse('qr_code.html', {'request': request, 'error': 'Invalid format.'})
+        return Response('Invalid format', status_code=400)
+
+
+# Redirection endpoint that counts scans
+@app.get('/qr-codes/{code_id}/scan')
+async def tracked_qr_scan(code_id: str):
+    qr_info = qr_db.get_qr_code(code_id)
+    if not qr_info:
+        return Response('QR code not found', status_code=404)
+    qr_db.increment_scan(code_id)
+    return RedirectResponse(qr_info['target_url'], status_code=302)

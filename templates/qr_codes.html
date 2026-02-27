@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Tracked QR Codes</title>
+    <link rel="icon" href="/public/favicon.ico">
+    <link rel="stylesheet" href="/public/css/table_page.css">
+</head>
+<body>
+        <h2>Tracked QR Codes</h2>
+        <p>
+            Welcome to the Tracked QR Code management page. Here, you can create QR codes that redirect to any URL and count how many times each code is scanned. Each QR code has a description to remind you of its purpose. You can download each code as SVG or PNG, and see the scan statistics in the table below.
+        </p>
+        <form method="post" style="margin-bottom: 2em;">
+                <fieldset style="border: 1px solid #ccc; padding: 1em; max-width: 600px;">
+                        <legend><b>Create a New QR Code</b></legend>
+                        <label for="target_url">Target URL:</label><br>
+                        <input type="url" id="target_url" name="target_url" required style="width: 400px;"><br><br>
+                        <label for="description">Description:</label><br>
+                        <input type="text" id="description" name="description" maxlength="1024" style="width: 400px;"><br><br>
+                        <button type="submit">Create QR Code</button>
+                        {% if error %}<p style="color: red;">{{ error }}</p>{% endif %}
+                </fieldset>
+        </form>
+        <table>
+        <thead>
+            <tr>
+                <th>Description</th>
+                <th>Target URL</th>
+                <th>Scans</th>
+                <th>QR (SVG)</th>
+                <th>QR (PNG)</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        {% for qr in qr_codes %}
+            <tr>
+                <td>{{ qr.description }}</td>
+                <td><a href="{{ qr.target_url }}" target="_blank">{{ qr.target_url }}</a></td>
+                <td>{{ qr.scan_count }}</td>
+                <td><a href="/qr-codes/{{ qr.code_id }}/qr.svg" target="_blank">SVG</a></td>
+                <td><a href="/qr-codes/{{ qr.code_id }}/qr.png" target="_blank">PNG</a></td>
+                <td>
+                    <form method="post" style="display:inline;">
+                        <input type="hidden" name="delete_code_id" value="{{ qr.code_id }}">
+                        <button type="submit" onclick="return confirm('Delete this QR code?');">Delete</button>
+                    </form>
+                </td>
+            </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+</body>
+</html>
