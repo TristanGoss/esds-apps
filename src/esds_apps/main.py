@@ -82,7 +82,7 @@ async def landing_page(request: Request):
     return config.TEMPLATES.TemplateResponse(request, 'landing.html')
 
 
-@app.get('/health')
+@app.api_route('/health', methods=['GET', 'HEAD'])
 async def health():
     return {'status': 'ok'}
 
