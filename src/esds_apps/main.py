@@ -82,6 +82,11 @@ async def landing_page(request: Request):
     return config.TEMPLATES.TemplateResponse(request, 'landing.html')
 
 
+@app.get('/health')
+async def health():
+    return {'status': 'ok'}
+
+
 @app.api_route('/membership-cards', methods=['GET', 'POST'], response_class=HTMLResponse)
 @password_auth
 async def membership_cards(request: Request):
