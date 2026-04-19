@@ -11,11 +11,18 @@ BASE_URL = 'https://apps.esds.org.uk'
 DB_PATH = CACHE_ROOT + '/qr_codes.db'
 
 SECRETS = dotenv_values('.env')
-for var_name in ['DC_API_TOKEN', 'GMAIL_APP_PASSWORD', 'UI_PASSWORD', 'PASS2U_API_KEY', 'DOOR_VOLUNTEERS_TEAM_ID']:
+for var_name in [
+    'DC_API_TOKEN',
+    'GMAIL_APP_EMAIL',
+    'GMAIL_APP_PASSWORD',
+    'UI_PASSWORD',
+    'PASS2U_API_KEY',
+    'DOOR_VOLUNTEERS_TEAM_ID',
+]:
     if var_name not in SECRETS:
         raise RuntimeError(f'Environment variable {var_name} is missing from the .env file.')
 
-IS_CARD_DISTRIBUTION_ENABLED = False
+IS_CARD_DISTRIBUTION_ENABLED = True
 CARD_DISTRIBUTION_EMAIL_BATCH_SIZE = 20
 AUTH_COOKIE_NAME = 'esds_apps_auth'
 AUTH_COOKIE_TIMEOUT_SECONDS = 24 * 60 * 60

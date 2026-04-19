@@ -182,7 +182,7 @@ async def compose_membership_email(card: MembershipCard) -> EmailMessage:
 def send_emails(emails: List[EmailMessage]) -> List[bool]:
     was_email_succesfully_delivered = [False] * len(emails)
     with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        smtp.login('info@esds.org.uk', config.SECRETS['GMAIL_APP_PASSWORD'])
+        smtp.login(config.SECRETS['GMAIL_APP_EMAIL'], config.SECRETS['GMAIL_APP_PASSWORD'])
         for i, email in enumerate(emails):
             try:
                 log.debug(f'About to send email to {email["To"]}')
