@@ -169,8 +169,9 @@ async def proxy_card_check(url: str):
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail='URL not permitted.')
 
 
-@app.get('/membership-cards/checks/logs', response_class=HTMLResponse)
-async def card_scanning_log(request: Request, _: None = Depends(require_valid_cookie)):
+@app.api_route('/membership-cards/checks/logs', methods=['GET', 'POST'], response_class=HTMLResponse)
+@password_auth
+async def card_scanning_log(request: Request):
     card_checks = await fetch_membership_card_checks()
     checks_in_the_last_30_days = [
         check
@@ -203,8 +204,9 @@ async def card_scanning_log(request: Request, _: None = Depends(require_valid_co
     )
 
 
-@app.get('/membership-cards/checks/download', response_class=StreamingResponse)
-async def download_checks(days_ago: int = Query(ge=0), _: None = Depends(require_valid_cookie)):
+@app.api_route('/membership-cards/checks/download', methods=['GET', 'POST'], response_class=StreamingResponse)
+@password_auth
+async def download_checks(request: Request, days_ago: int = Query(ge=0)):
     card_checks = await fetch_membership_card_checks()
     rows = sorted(
         [
