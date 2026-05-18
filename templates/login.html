@@ -1,22 +1,25 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
     <title>Login</title>
     <link rel="icon" href="/public/favicon.ico">
-    <link rel="stylesheet" href="/public/css/base.css">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="/public/css/site.css">
 </head>
 
 <body>
-    <h1>Enter Password</h1>
-    {% if error %}
-    <p style="color: red;">{{ error }}</p>
-    {% endif %}
-    <form method="post">
-        <input type="password" name="password" autofocus>
-        <button type="submit" {% if disable_submission %}disabled{% endif %}>Submit</button>
-    </form>
+    <main class="container">
+        <h1>Enter Password</h1>
+        {% if error %}
+        <p class="error">{{ error }}</p>
+        {% endif %}
+        <form method="post">
+            <input type="password" name="password" autofocus>
+            <button type="submit" {% if disable_submission %}disabled{% endif %}>Submit</button>
+        </form>
+    </main>
 </body>
 
 </html>

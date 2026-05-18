@@ -1,63 +1,67 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>Dancecloud POS Access</title>
     <link rel="icon" href="/public/favicon.ico">
-    <link rel="stylesheet" href="/public/css/table_page.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="/public/css/site.css">
 </head>
 <body>
-    <h1>Dancecloud POS Access</h1>
-    <p>Welcome to the Dancecloud POS Access management page. Here, you can add and remove people to the group
-        who are allowed to use <a href="pos.dancecloud.com" target="_blank">pos.dancecloud.com</a> without having an ESDS organiser account.
-        Individuals must have a Dancecloud account before they can be added here.
-        We add Door Volunteers and Safer Spaces Volunteers here rather than giving them Dancecloud organiser access in order to reduce their access to PII
-        and to prevent them from arbitrarily creating, editing and deleting dancecloud events.
-    </p>
-    <form id="pos-permissions-form">
-        <label for="add-via-email">Add via email:</label>
-        <input type="text" id="add-via-email" placeholder="e.g. john.doe@mail.com">
-        <button type="button"
-                id="add-volunteer-btn"
-                class="action-button"
-                disabled>
-            Add volunteer
-        </button>
-        <br>
-        <label for="filter-first-name">Filter by First Name:</label>
-        <input type="text" id="filter-first-name" placeholder="e.g. Alice">
-        <table>
-            <thead>
-                <tr>
-                    <th>First Name</th>
-                    <th>Last Name</th>
-                    <th>Email</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for volunteer in volunteers %}
-                <tr>
-                    <td>{{ volunteer.first_name }}</td>
-                    <td>{{ volunteer.last_name }}</td>
-                    <td>{{ volunteer.email }}</td>
-                    <td class="action-cell">
-                        <div class="action-group">
-                            <button type="button"
-                                    id="remove-btn-{{ volunteer.volunteer_uuid }}"
-                                    onclick="submitRemove('{{ volunteer.volunteer_uuid }}', '{{ volunteer.first_name }}')"
-                                    class="action-button">
-                                Remove
-                            </button>
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </form>
+    {% include "membership_navbar.html" %}
+    <main class="container">
+        <h1>Dancecloud POS Access</h1>
+        <p>Welcome to the Dancecloud POS Access management page. Here, you can add and remove people to the group
+            who are allowed to use <a href="pos.dancecloud.com" target="_blank">pos.dancecloud.com</a> without having an ESDS organiser account.
+            Individuals must have a Dancecloud account before they can be added here.
+            We add Door Volunteers and Safer Spaces Volunteers here rather than giving them Dancecloud organiser access in order to reduce their access to PII
+            and to prevent them from arbitrarily creating, editing and deleting dancecloud events.
+        </p>
+        <form id="pos-permissions-form">
+            <label for="add-via-email">Add via email:</label>
+            <input type="text" id="add-via-email" placeholder="e.g. john.doe@mail.com">
+            <button type="button"
+                    id="add-volunteer-btn"
+                    class="action-button"
+                    disabled>
+                Add volunteer
+            </button>
+            <br>
+            <label for="filter-first-name">Filter by First Name:</label>
+            <input type="text" id="filter-first-name" placeholder="e.g. Alice">
+            <table>
+                <thead>
+                    <tr>
+                        <th>First Name</th>
+                        <th>Last Name</th>
+                        <th>Email</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for volunteer in volunteers %}
+                    <tr>
+                        <td>{{ volunteer.first_name }}</td>
+                        <td>{{ volunteer.last_name }}</td>
+                        <td>{{ volunteer.email }}</td>
+                        <td class="action-cell">
+                            <div class="action-group">
+                                <button type="button"
+                                        id="remove-btn-{{ volunteer.volunteer_uuid }}"
+                                        onclick="submitRemove('{{ volunteer.volunteer_uuid }}', '{{ volunteer.first_name }}')"
+                                        class="action-button danger">
+                                    Remove
+                                </button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </form>
+    </main>
     <script src="/public/js/pos_permissions.js"></script>
     <script>
-    // Enable Add button only when input is not empty
     const addInput = document.getElementById('add-via-email');
     const addBtn = document.getElementById('add-volunteer-btn');
     addInput.addEventListener('input', function() {

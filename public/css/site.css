@@ -1,0 +1,55 @@
+body > nav img {
+    height: 2rem;
+    width: auto;
+    max-width: none;
+    vertical-align: middle;
+}
+
+body > nav {
+    background-color: var(--pico-card-background-color, #f3f3f3);
+    border-bottom: 1px solid var(--pico-muted-border-color, #e7e7e7);
+    padding: 0.25rem 1rem;
+    margin-bottom: 1rem;
+}
+
+.danger {
+    --pico-background-color: #c0392b;
+    --pico-border-color: #a93226;
+    --pico-color: #fff;
+}
+
+.warning {
+    --pico-background-color: #d68910;
+    --pico-border-color: #b7770d;
+    --pico-color: #fff;
+}
+
+.error {
+    color: var(--pico-del-color, #c0392b);
+}
+
+.action-button,
+.action-select {
+    margin-bottom: 0;
+}
+
+.action-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5em;
+}
+
+.action-group {
+    display: flex;
+    align-items: center;
+    gap: 0.5em;
+}
+
+td, th {
+    white-space: nowrap;
+}
+
+.inline-form {
+    display: inline;
+    margin: 0;
+}

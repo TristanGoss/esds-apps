@@ -12,7 +12,7 @@ function showImageModal(cardNumber) {
     cardFrontImage.style.display = "none";
     cardFrontModalloadingMessage.style.display = "block";
     cardFrontImage.src = `/membership-cards/${encodeURIComponent(cardNumber)}/card-front.png`;
-    cardFrontModal.style.display = "block";
+    cardFrontModal.showModal();
 }
 
 // Hide loading message and show image once card front available.
@@ -23,33 +23,37 @@ cardFrontImage.addEventListener("load", function () {
 
 // Close card front modal.
 cardFrontModalClose.addEventListener("click", function () {
-    cardFrontModal.style.display = "none";
+    cardFrontModal.close();
     cardFrontModalloadingMessage.style.display = "block";
     cardFrontImage.src = ""; // Reset image to avoid stale loads
 });
 
+// Close card front modal on backdrop click.
+cardFrontModal.addEventListener("click", function (e) {
+    if (e.target === cardFrontModal) {
+        cardFrontModal.close();
+        cardFrontModalloadingMessage.style.display = "block";
+        cardFrontImage.src = "";
+    }
+});
+
 // PDF download button triggers print layout modal.
 document.getElementById("download-pdf-btn").addEventListener("click", function () {
-    printModal.style.display = "block";
     addSelectedCardsToForm();
+    printModal.showModal();
 });
 
 // Close print layout modal.
 printModalClose.addEventListener("click", function () {
-    printModal.style.display = "none";
+    printModal.close();
 });
 
-// Close modals if the user clicks outside of them.
-window.onclick = function(event) {
-    if (event.target === printModal) {
-        printModal.style.display = "none";
+// Close print layout modal on backdrop click.
+printModal.addEventListener("click", function (e) {
+    if (e.target === printModal) {
+        printModal.close();
     }
-    if (event.target === cardFrontModal) {
-        cardFrontModal.style.display = "none";
-        cardFrontModalloadingMessage.style.display = "block";
-        cardFrontImage.src = ""; // Reset image to avoid stale loads
-    }
-};
+});
 
 // Remove non-selected cards from and add the selected cards to the form submitted by the print layout modal.
 function addSelectedCardsToForm() {

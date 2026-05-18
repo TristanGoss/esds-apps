@@ -1,14 +1,17 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <title>Rapid Scanner</title>
   <link rel="icon" href="/public/favicon.ico">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/public/css/site.css">
   <link rel="stylesheet" href="/public/css/rapid_scanner.css">
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
 </head>
 <body>
-  <div id="all">
+  {% include "membership_navbar.html" %}
+  <main class="container">
     <h1>Rapid Membership card scanner</h1>
     <div id="scanner-container">
       <div id="qr-help" class="help-overlay">
@@ -29,7 +32,7 @@
       <div id="qr-reader"></div>
     </div>
     <div id="result"></div>
-  </div>
+  </main>
   <script src="/public/js/card_scanner.js"></script>
 </body>
 </html>

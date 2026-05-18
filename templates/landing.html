@@ -1,34 +1,34 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 
 <head>
   <title>Welcome</title>
   <link rel="icon" href="/public/favicon.ico">
-  <link rel="stylesheet" href="/public/css/base.css">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/public/css/site.css">
 </head>
 
 <body>
-  <h1>Welcome to the ESDS Apps Server!</h1>
-  <p>
-    This server contains a number of applications built collaboratively
-    on top of <a href="https://www.dancecloud.com" target="_blank">Dancecloud</a> for use by the
-    <a href="https://www.esds.org.uk" target="_blank">Edinburgh Swing Dance Society</a>.
-  </p>
-  <p>
-    You can find the source code for this server <a href="https://github.com/TristanGoss/esds-apps" target="_blank">here</a>. If you're
-    interested in collaborating, please contact <a href="mailto:info@esds.org.uk">info@esds.org.uk</a>.
-  </p>
-  <p>
-    There are four pieces of content available:
-    <ul>
-      <li>Our <a href="/membership-cards">Membership cards management</a> app.</li>
-      <li>Our <a href="/pos-permissions">Dancecloud POS permissions</a> app.</li>
-      <li>Our <a href="/membership-cards/scanner">Rapid card scanner</a> app.</li>
-      <li>Our <a href="/qr-codes">Tracked QR code generator</a> app.</li>
-    </ul>
-  </p>
-
+  <main class="container">
+    <h1>Welcome to the ESDS Apps Server!</h1>
+    <p>
+      This server contains a number of applications built collaboratively
+      on top of <a href="https://www.dancecloud.com" target="_blank">Dancecloud</a> for use by the
+      <a href="https://www.esds.org.uk" target="_blank">Edinburgh Swing Dance Society</a>.
+    </p>
+    <p>
+      You can find the source code for this server <a href="https://github.com/TristanGoss/esds-apps" target="_blank">here</a>. If you're
+      interested in collaborating, please contact <a href="mailto:info@esds.org.uk">info@esds.org.uk</a>.
+    </p>
+    <div style="display: flex; flex-wrap: wrap; gap: 1rem; justify-content: center; white-space: nowrap;">
+      <a href="/membership-cards" role="button">Membership Cards</a>
+      <a href="/membership-cards/scanner" role="button">Card Scanner</a>
+      <a href="/membership-cards/checks/logs" role="button">Card Scan Logs</a>
+      <a href="/pos-permissions" role="button">POS Management</a>
+      <a href="/qr-codes" role="button">Tracked QR Codes</a>
+    </div>
+  </main>
 </body>
 
 </html>

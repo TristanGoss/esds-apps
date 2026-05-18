@@ -1,136 +1,148 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <title>ESDS Membership Cards</title>
     <link rel="icon" href="/public/favicon.ico">
-    <link rel="stylesheet" href="/public/css/table_page.css">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="/public/css/site.css">
 </head>
 <body>
     {% include "membership_navbar.html" %}
-    <h1>ESDS Membership Cards</h1>
-    <p>Welcome to the Membership Card management page. Here, you can monitor the status of all existing membership cards,
-        cancel them, reissue them if they are lost, stolen or damaged, and download A4 sheets that can be used to print the cards.
-        Remember that we integrate with both <a href="https://www.dancecloud.com" target="_blank">Dancecloud</a> 
-        and <a href="https://www.pass2u.net/" target="_blank">Pass2U</a>, so you may want to log in there as well.
-    </p>
-    <form id="card-selection-form">
-        <label for="filter-first-name">Filter by First Name:</label>
-        <input type="text" id="filter-first-name" placeholder="e.g. Alice">
-        <button type="button" id="download-pdf-btn" disabled>Download selected cards as A4 PDF</button>
-        <table>
-            <thead>
-                <tr>
-                    <th>Select</th>
-                    <th>Card Number</th>
-                    <th>First Name</th>
-                    <th>Last Name</th>
-                    <th>Email</th>
-                    <th>Status</th>
-                    <th>Expires On</th>
-                    <th>Actions</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for card in cards %}
-                <tr>
-                    <td class="select-cell">
-                        <input type="checkbox" name="card_uuid" value="{{ card.card_uuid }}">
-                    </td>
-                    <td>{{ card.card_number }}</td>
-                    <td>{{ card.first_name }}</td>
-                    <td>{{ card.last_name }}</td>
-                    <td>{{ card.email }}</td>
-                    <td>{{ card.status.value }}</td>
-                    <td>{{ card.expires_at.strftime("%d-%m-%Y") }}</td>
-                    <td class="action-cell">
-                        <div class="action-group">
-                            <button type="button"
-                                    onclick="showImageModal('{{ card.card_number }}')"
-                                    class="action-button">
-                                View Front
-                            </button>
-                        </div>
-                        <div class="action-group">
-                            <button type="button"
-                                    id="cancel-btn-{{ card.card_uuid }}"
-                                    onclick="submitCancel('{{ card.card_uuid }}', '{{ card.first_name }}')"
-                                    class="action-button">
-                                Cancel
-                            </button>
-                        </div>
-                        <div class="action-group">
-                            <button type="button"
-                                    id="reissue-btn-{{ card.card_uuid }}"
-                                    onclick="submitReissue('{{ card.card_uuid }}', '{{ card.first_name }}')"
-                                    class="action-button"
-                                    disabled>
-                                Reissue
-                            </button>
-                            <select id="reason-{{ card.card_uuid }}"
-                                    onchange="updateReissueButton('{{ card.card_uuid }}')"
-                                    class="action-select">
-                                <option value="" disabled selected>Reason</option>
-                                <option value="stolen">Stolen</option>
-                                <option value="lost">Lost</option>
-                                <option value="damaged">Damaged</option>
-                            </select>
-                        </div>
-                    </td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </form>
-    <div id="printModal" class="modal">
-        <div class="modal-content">
-            <span class="close" id="printModalClose">&times;</span>
-            <h2>Print Layout Settings</h2>
-            <p>
-                Please specify the margins for the A4 print layout for the selected cards.
-                Odd-numbered pages will contain card fronts, even-numbered pages will contain card backs.
-            </p>
-            <p>
-                The cards should be printed on 95um Xerox Premium NeverTear synthetic paper using double-sided printing,
-                the whole sheet laminated, and then each card cut out individually.
-                When cutting, <b>do not</b> leave a laminate-only "border" around the cards.
-            </p>
-            <form id="layout-form" method="POST" action="/membership-cards/print-layout/pdf">
-                <div class="print-layout-form-row">
-                    <label for="card-width">Card Width (mm):</label>
-                    <input id="card-width" type="number" name="card_width_mm" value="85.6" step="any" required>
-                </div>
-                <div class="print-layout-form-row">
-                    <label for="card-height">Card Height (mm):</label>
-                    <input id="card-height" type="number" name="card_height_mm" value="54" step="any" required>
-                </div>
-                <div class="print-layout-form-row">
-                    <label for="margin-top">Top Margin (mm):</label>
-                    <input id="margin-top" type="number" name="margin_top_mm" value="15" step="any" required>
-                </div>
-                <div class="print-layout-form-row">
-                    <label for="margin-left">Left Margin (mm):</label>
-                    <input id="margin-left" type="number" name="margin_left_mm" value="14.4" step="any" required>
-                </div>
-                <div class="print-layout-form-row">
-                    <label for="horizontal-gap">Horizontal Gap (mm):</label>
-                    <input id="horizontal-gap" type="number" name="horizontal_gap_mm" value="10" step="any" required>
-                </div>
-                <div class="print-layout-form-row">
-                    <label for="vertical-gap">Vertical Gap (mm):</label>
-                    <input id="vertical-gap" type="number" name="vertical_gap_mm" value="10" step="any" required>
-                </div>
-            </form>
-            <button type="submit" form="layout-form">Generate PDF</button>
-        </div>
-    </div>
-    <div id="cardFrontModal" class="modal">
-        <div class="modal-content">
-            <span class="close" id="cardFrontModalClose">&times;</span>
-            <h2>Card Front</h2>
-            <p id="cardFrontModalloadingMessage" style="color: grey;">Loading...</p>
-            <img id="cardFrontImage" src="" alt="Card Front" style="max-width: 100%; max-height: 500px;">
-        </div>
-    </div>
+    <main class="container">
+        <h1>ESDS Membership Cards</h1>
+        <p>Welcome to the Membership Card management page. Here, you can monitor the status of all existing membership cards,
+            cancel them, reissue them if they are lost, stolen or damaged, and download A4 sheets that can be used to print the cards.
+            Remember that we integrate with both <a href="https://www.dancecloud.com" target="_blank">Dancecloud</a>
+            and <a href="https://www.pass2u.net/" target="_blank">Pass2U</a>, so you may want to log in there as well.
+        </p>
+        <form id="card-selection-form">
+            <label for="filter-first-name">Filter by First Name:</label>
+            <input type="text" id="filter-first-name" placeholder="e.g. Alice">
+            <button type="button" id="download-pdf-btn" disabled>Download selected cards as A4 PDF</button>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Select</th>
+                        <th>Card Number</th>
+                        <th>First Name</th>
+                        <th>Last Name</th>
+                        <th>Email</th>
+                        <th>Status</th>
+                        <th>Expires On</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for card in cards %}
+                    <tr>
+                        <td>
+                            <input type="checkbox" name="card_uuid" value="{{ card.card_uuid }}">
+                        </td>
+                        <td>{{ card.card_number }}</td>
+                        <td>{{ card.first_name }}</td>
+                        <td>{{ card.last_name }}</td>
+                        <td>{{ card.email }}</td>
+                        <td>{{ card.status.value }}</td>
+                        <td>{{ card.expires_at.strftime("%d-%m-%Y") }}</td>
+                        <td class="action-cell">
+                            <div class="action-group">
+                                <button type="button"
+                                        onclick="showImageModal('{{ card.card_number }}')"
+                                        class="action-button">
+                                    View Front
+                                </button>
+                            </div>
+                            <div class="action-group">
+                                <button type="button"
+                                        id="cancel-btn-{{ card.card_uuid }}"
+                                        onclick="submitCancel('{{ card.card_uuid }}', '{{ card.first_name }}')"
+                                        class="action-button danger">
+                                    Cancel
+                                </button>
+                            </div>
+                            <div class="action-group">
+                                <button type="button"
+                                        id="reissue-btn-{{ card.card_uuid }}"
+                                        onclick="submitReissue('{{ card.card_uuid }}', '{{ card.first_name }}')"
+                                        class="action-button warning"
+                                        disabled>
+                                    Reissue
+                                </button>
+                                <select id="reason-{{ card.card_uuid }}"
+                                        onchange="updateReissueButton('{{ card.card_uuid }}')"
+                                        class="action-select">
+                                    <option value="" disabled selected>Reason</option>
+                                    <option value="stolen">Stolen</option>
+                                    <option value="lost">Lost</option>
+                                    <option value="damaged">Damaged</option>
+                                </select>
+                            </div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </form>
+
+        <dialog id="printModal">
+            <article>
+                <header>
+                    <button id="printModalClose" rel="prev" aria-label="Close"></button>
+                    <strong>Print Layout Settings</strong>
+                </header>
+                <p>
+                    Please specify the margins for the A4 print layout for the selected cards.
+                    Odd-numbered pages will contain card fronts, even-numbered pages will contain card backs.
+                </p>
+                <p>
+                    The cards should be printed on 95um Xerox Premium NeverTear synthetic paper using double-sided printing,
+                    the whole sheet laminated, and then each card cut out individually.
+                    When cutting, <b>do not</b> leave a laminate-only "border" around the cards.
+                </p>
+                <form id="layout-form" method="POST" action="/membership-cards/print-layout/pdf">
+                    <div class="grid">
+                        <label for="card-width">Card Width (mm):</label>
+                        <input id="card-width" type="number" name="card_width_mm" value="85.6" step="any" required>
+                    </div>
+                    <div class="grid">
+                        <label for="card-height">Card Height (mm):</label>
+                        <input id="card-height" type="number" name="card_height_mm" value="54" step="any" required>
+                    </div>
+                    <div class="grid">
+                        <label for="margin-top">Top Margin (mm):</label>
+                        <input id="margin-top" type="number" name="margin_top_mm" value="15" step="any" required>
+                    </div>
+                    <div class="grid">
+                        <label for="margin-left">Left Margin (mm):</label>
+                        <input id="margin-left" type="number" name="margin_left_mm" value="14.4" step="any" required>
+                    </div>
+                    <div class="grid">
+                        <label for="horizontal-gap">Horizontal Gap (mm):</label>
+                        <input id="horizontal-gap" type="number" name="horizontal_gap_mm" value="10" step="any" required>
+                    </div>
+                    <div class="grid">
+                        <label for="vertical-gap">Vertical Gap (mm):</label>
+                        <input id="vertical-gap" type="number" name="vertical_gap_mm" value="10" step="any" required>
+                    </div>
+                </form>
+                <footer>
+                    <button type="submit" form="layout-form">Generate PDF</button>
+                </footer>
+            </article>
+        </dialog>
+
+        <dialog id="cardFrontModal">
+            <article>
+                <header>
+                    <button id="cardFrontModalClose" rel="prev" aria-label="Close"></button>
+                    <strong>Card Front</strong>
+                </header>
+                <p id="cardFrontModalloadingMessage">Loading...</p>
+                <img id="cardFrontImage" src="" alt="Card Front" style="max-width: 100%; max-height: 500px; display: none;">
+            </article>
+        </dialog>
+    </main>
     <script src="/public/js/membership_cards.js"></script>
 </body>
 </html>
