@@ -49,17 +49,18 @@ function submitAdd(volunteer_email) {
 
 
 // Submit a request to remove Dancecloud POS permissions from a volunteer
-function submitRemove(volunteerUuid, volunteerFirstName) {
+document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.remove-btn');
+    if (!btn) return;
+
+    const volunteerUuid = btn.dataset.uuid;
+    const volunteerFirstName = btn.dataset.name;
     const confirmMsg = `Are you sure you want to remove Dancecloud POS permissions from ${volunteerFirstName}?`;
-    const confirmed = window.confirm(confirmMsg);
+    if (!window.confirm(confirmMsg)) return;
 
-    if (!confirmed) return;
-
-    fetch(`/pos-permissions/${volunteerUuid}/remove`, {
+    fetch(`/pos-permissions/${encodeURIComponent(volunteerUuid)}/remove`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
     })
     .then(response => {
         if (response.redirected) {
@@ -70,7 +71,5 @@ function submitRemove(volunteerUuid, volunteerFirstName) {
             alert('Failed to remove volunteer.');
         }
     })
-    .catch(() => {
-        alert('Failed to remove volunteer.');
-    });
-}
+    .catch(() => { alert('Failed to remove volunteer.'); });
+});

@@ -2,6 +2,7 @@ import asyncio
 import csv
 import io
 import logging
+import re
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -9,6 +10,7 @@ from datetime import datetime, timedelta
 from http import HTTPStatus
 from io import BytesIO
 from typing import List
+from urllib.parse import urlparse
 
 import httpx
 import pytz
@@ -47,6 +49,23 @@ logging.basicConfig(
 
 log = logging.getLogger(__name__)
 
+_EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+_SAFE_FILENAME_RE = re.compile(r'[^\w\-.]')
+
+
+def _safe_filename(name: str) -> str:
+    """Strip anything that isn't alphanumeric, hyphen, or dot from a filename segment."""
+    return _SAFE_FILENAME_RE.sub('_', name) or 'download'
+
+
+def _is_safe_url(url: str) -> bool:
+    """Return True only if the URL has an http or https scheme."""
+    try:
+        parsed = urlparse(url)
+        return parsed.scheme in ('http', 'https') and bool(parsed.netloc)
+    except Exception:
+        return False
+
 
 @asynccontextmanager
 async def lifespan_manager(_: FastAPI):
@@ -72,9 +91,15 @@ app.add_middleware(
         config.DC_HOST,
     ],
     allow_credentials=True,
-    allow_methods=['*'],
-    allow_headers=['*'],
+    allow_methods=['GET', 'POST', 'DELETE'],
+    allow_headers=['Content-Type', 'Authorization'],
 )
+
+
+@app.exception_handler(Exception)
+async def internal_server_error_handler(request: Request, exc: Exception):
+    log.exception(f'Unhandled exception on {request.method} {request.url}: {exc}')
+    return config.TEMPLATES.TemplateResponse(request, '500.html', status_code=500)
 
 
 @app.get('/', response_class=HTMLResponse)
@@ -107,7 +132,10 @@ async def pos_permissions(request: Request):
 async def add_volunteer(request: Request, _: None = Depends(require_valid_cookie)):
     # add POS permissions to a volunteer
     data = await request.json()
-    await add_pos_permissions(data['volunteer_email'])
+    email = data.get('volunteer_email', '')
+    if not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=HTTPStatus.UNPROCESSABLE_ENTITY, detail='Invalid email address.')
+    await add_pos_permissions(email)
 
     # Redirect back to the table view
     return RedirectResponse(url='/pos-permissions', status_code=303)
@@ -138,7 +166,7 @@ async def proxy_card_check(url: str):
             resp = await client.get(url)
         return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get('content-type'))
     else:
-        return f'url did not start with {config.DC_HOST}, so has not been proxied.'
+        raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail='URL not permitted.')
 
 
 @app.get('/membership-cards/checks/logs', response_class=HTMLResponse)
@@ -204,8 +232,15 @@ async def download_checks(days_ago: int = Query(ge=0), _: None = Depends(require
 
 @app.post('/membership-cards/{card_uuid}/reissue', response_class=RedirectResponse)
 async def reissue_card(
-    request: Request, card_uuid: str, reason: MembershipCardStatus = Form(...), _: None = Depends(require_valid_cookie)
+    request: Request,
+    card_uuid: str,
+    reason: MembershipCardStatus = Form(...),
+    confirm_password: str = Form(...),
+    _: None = Depends(require_valid_cookie),
 ):
+    if confirm_password != config.SECRETS['UI_PASSWORD']:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail='Incorrect password.')
+
     # find the full details of the card that this UUID refers to
     # Why do this? Because we can only filter on card number,
     # but the dancecloud reissue route wants the card_uuid as an argument.
@@ -223,7 +258,15 @@ async def reissue_card(
 
 
 @app.post('/membership-cards/{card_uuid}/cancel', response_class=RedirectResponse)
-async def cancel_card(request: Request, card_uuid: str, _: None = Depends(require_valid_cookie)):
+async def cancel_card(
+    request: Request,
+    card_uuid: str,
+    confirm_password: str = Form(...),
+    _: None = Depends(require_valid_cookie),
+):
+    if confirm_password != config.SECRETS['UI_PASSWORD']:
+        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail='Incorrect password.')
+
     # find the full details of the card that this UUID refers to
     # Why do this? Because we can only filter on card number,
     # but the dancecloud reissue route wants the card_uuid as an argument.
@@ -351,6 +394,8 @@ async def qr_codes_table(request: Request):
         description = form.get('description', '').strip()
         if not target_url:
             error = 'Please enter a target URL.'
+        elif not _is_safe_url(target_url):
+            error = 'Target URL must start with http:// or https://.'
         else:
             code_id = str(uuid.uuid4())[:8]
             qr_db.add_qr_code(code_id, target_url, description)
@@ -378,7 +423,7 @@ async def serve_tracked_qr_code(request: Request, code_id: str, fmt: str):
     buf = io.BytesIO()
     # Use description for filename, fallback to code_id
     desc = qr_info.get('description') or code_id
-    safe_desc = desc.replace(' ', '_')
+    safe_desc = _safe_filename(desc)
     if fmt == 'svg':
         qr.save(buf, kind='svg', scale=4)
         buf.seek(0)
@@ -405,8 +450,12 @@ async def tracked_qr_scan(code_id: str):
     qr_info = qr_db.get_qr_code(code_id)
     if not qr_info:
         return Response('QR code not found', status_code=404)
+    target_url = qr_info['target_url']
+    if not _is_safe_url(target_url):
+        log.error(f'QR code {code_id} has an unsafe target_url in the database: {target_url!r}')
+        raise HTTPException(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, detail='Invalid redirect target.')
     qr_db.increment_scan(code_id)
-    return RedirectResponse(qr_info['target_url'], status_code=302)
+    return RedirectResponse(target_url, status_code=302)
 
 
 # Download scan datetimes as CSV for a QR code
@@ -428,7 +477,7 @@ async def download_qr_code_scans_csv(request: Request, code_id: str):
             writer.writerow([str(dt)])
     buf.seek(0)
     desc = qr_info.get('description') or code_id
-    safe_desc = desc.replace(' ', '_')
+    safe_desc = _safe_filename(desc)
     return Response(
         content=buf.read(),
         media_type='text/csv',

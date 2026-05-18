@@ -48,8 +48,9 @@
                             <div class="action-group">
                                 <button type="button"
                                         id="remove-btn-{{ volunteer.volunteer_uuid }}"
-                                        onclick="submitRemove('{{ volunteer.volunteer_uuid }}', '{{ volunteer.first_name }}')"
-                                        class="action-button danger">
+                                        data-uuid="{{ volunteer.volunteer_uuid }}"
+                                        data-name="{{ volunteer.first_name }}"
+                                        class="action-button danger remove-btn">
                                     Remove
                                 </button>
                             </div>

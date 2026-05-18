@@ -56,22 +56,24 @@
                             <div class="action-group">
                                 <button type="button"
                                         id="cancel-btn-{{ card.card_uuid }}"
-                                        onclick="submitCancel('{{ card.card_uuid }}', '{{ card.first_name }}')"
-                                        class="action-button danger">
+                                        data-uuid="{{ card.card_uuid }}"
+                                        data-name="{{ card.first_name }}"
+                                        class="action-button danger cancel-btn">
                                     Cancel
                                 </button>
                             </div>
                             <div class="action-group">
                                 <button type="button"
                                         id="reissue-btn-{{ card.card_uuid }}"
-                                        onclick="submitReissue('{{ card.card_uuid }}', '{{ card.first_name }}')"
-                                        class="action-button warning"
+                                        data-uuid="{{ card.card_uuid }}"
+                                        data-name="{{ card.first_name }}"
+                                        class="action-button warning reissue-btn"
                                         disabled>
                                     Reissue
                                 </button>
                                 <select id="reason-{{ card.card_uuid }}"
-                                        onchange="updateReissueButton('{{ card.card_uuid }}')"
-                                        class="action-select">
+                                        data-uuid="{{ card.card_uuid }}"
+                                        class="action-select reason-select">
                                     <option value="" disabled selected>Reason</option>
                                     <option value="stolen">Stolen</option>
                                     <option value="lost">Lost</option>
@@ -128,6 +130,25 @@
                 </form>
                 <footer>
                     <button type="submit" form="layout-form">Generate PDF</button>
+                </footer>
+            </article>
+        </dialog>
+
+        <dialog id="reAuthModal">
+            <article>
+                <header>
+                    <button id="reAuthModalClose" rel="prev" aria-label="Close"></button>
+                    <strong id="reAuthModalTitle">Confirm Action</strong>
+                </header>
+                <p id="reAuthModalMessage"></p>
+                <form id="reAuthForm" method="POST">
+                    <input type="hidden" name="reason" id="reAuthReason">
+                    <label for="reAuthPassword">Enter your password to confirm:</label>
+                    <input type="password" id="reAuthPassword" name="confirm_password" autocomplete="current-password" required autofocus>
+                    <p id="reAuthError" class="error" style="display:none;"></p>
+                </form>
+                <footer>
+                    <button type="submit" form="reAuthForm" id="reAuthSubmit">Confirm</button>
                 </footer>
             </article>
         </dialog>

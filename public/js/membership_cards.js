@@ -6,6 +6,15 @@ const cardFrontImage = document.getElementById("cardFrontImage");
 const printModal = document.getElementById("printModal");
 const printModalClose = document.getElementById("printModalClose");
 
+const reAuthModal = document.getElementById("reAuthModal");
+const reAuthModalClose = document.getElementById("reAuthModalClose");
+const reAuthForm = document.getElementById("reAuthForm");
+const reAuthPassword = document.getElementById("reAuthPassword");
+const reAuthError = document.getElementById("reAuthError");
+const reAuthReason = document.getElementById("reAuthReason");
+const reAuthModalMessage = document.getElementById("reAuthModalMessage");
+const reAuthModalTitle = document.getElementById("reAuthModalTitle");
+
 // show Card Front modal
 function showImageModal(cardNumber) {
     // Reset state
@@ -105,51 +114,64 @@ document.addEventListener("DOMContentLoaded", function () {
 });
 
 // Ensure reissue button is only enabled if a reason is selected.
-function updateReissueButton(cardUuid) {
-    const reasonSelect = document.getElementById(`reason-${cardUuid}`);
+document.addEventListener('change', function (e) {
+    if (!e.target.classList.contains('reason-select')) return;
+    const cardUuid = e.target.dataset.uuid;
     const button = document.getElementById(`reissue-btn-${cardUuid}`);
-    button.disabled = !reasonSelect.value;
+    button.disabled = !e.target.value;
+});
+
+// Open the re-auth modal configured for the given action, then submit on confirm.
+function openReAuthModal(title, message, actionUrl, reason) {
+    reAuthModalTitle.textContent = title;
+    reAuthModalMessage.textContent = message;
+    reAuthForm.action = actionUrl;
+    reAuthReason.value = reason || '';
+    reAuthPassword.value = '';
+    reAuthError.style.display = 'none';
+    reAuthModal.showModal();
+    reAuthPassword.focus();
 }
 
-// Submit a request to reissue a card
-function submitReissue(cardUuid, cardFirstName) {
-    const reasonSelect = document.getElementById(`reason-${cardUuid}`);
-    const reason = reasonSelect.value;
+// Close re-auth modal.
+reAuthModalClose.addEventListener("click", function () {
+    reAuthModal.close();
+});
 
-    if (!reason) return;
+// Close re-auth modal on backdrop click.
+reAuthModal.addEventListener("click", function (e) {
+    if (e.target === reAuthModal) {
+        reAuthModal.close();
+    }
+});
 
-    const confirmMsg = `Are you sure you want to reissue the membership card belonging to ${cardFirstName} because it has been ${reason}?`;
-    const confirmed = window.confirm(confirmMsg);
+// Reissue and cancel buttons use event delegation to avoid inline JS with user data.
+document.addEventListener('click', function (e) {
+    const reissueBtn = e.target.closest('.reissue-btn');
+    if (reissueBtn) {
+        const cardUuid = reissueBtn.dataset.uuid;
+        const cardFirstName = reissueBtn.dataset.name;
+        const reasonSelect = document.getElementById(`reason-${cardUuid}`);
+        const reason = reasonSelect ? reasonSelect.value : '';
+        if (!reason) return;
+        openReAuthModal(
+            'Confirm Reissue',
+            `You are about to reissue the membership card belonging to ${cardFirstName} because it has been ${reason}. Enter your password to confirm.`,
+            `/membership-cards/${cardUuid}/reissue`,
+            reason
+        );
+        return;
+    }
 
-    if (!confirmed) return;
-
-    // Create and submit a form dynamically
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = `/membership-cards/${cardUuid}/reissue`;
-
-    const input = document.createElement("input");
-    input.type = "hidden";
-    input.name = "reason";
-    input.value = reason;
-
-    form.appendChild(input);
-    document.body.appendChild(form);
-    form.submit();
-}
-
-// Submit a request to cancel a card
-function submitCancel(cardUuid, cardFirstName) {
-    const confirmMsg = `Are you sure you want to cancel the membership card belonging to ${cardFirstName}?`;
-    const confirmed = window.confirm(confirmMsg);
-
-    if (!confirmed) return;
-
-    // Create and submit a form dynamically
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = `/membership-cards/${cardUuid}/cancel`;
-
-    document.body.appendChild(form);
-    form.submit();
-}
+    const cancelBtn = e.target.closest('.cancel-btn');
+    if (cancelBtn) {
+        const cardUuid = cancelBtn.dataset.uuid;
+        const cardFirstName = cancelBtn.dataset.name;
+        openReAuthModal(
+            'Confirm Cancellation',
+            `You are about to cancel the membership card belonging to ${cardFirstName}. This cannot be undone. Enter your password to confirm.`,
+            `/membership-cards/${cardUuid}/cancel`,
+            ''
+        );
+    }
+});

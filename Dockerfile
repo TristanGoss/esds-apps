@@ -33,4 +33,8 @@ ENV PYTHONPATH=/app/src
 
 RUN poetry install
 
+RUN groupadd --gid 1001 appuser && useradd --uid 1001 --gid 1001 --no-create-home appuser
+RUN mkdir -p /tmp/esds_cache && chown appuser:appuser /tmp/esds_cache
+USER appuser
+
 CMD ["poetry", "run", "uvicorn", "esds_apps.main:app", "--host", "0.0.0.0", "--port", "8080"]

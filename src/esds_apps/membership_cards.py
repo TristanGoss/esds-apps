@@ -163,8 +163,12 @@ async def compose_membership_email(card: MembershipCard) -> EmailMessage:
     msg.add_attachment(qr_code_png, maintype='image', subtype='png', filename=f'membership_card_{card.card_number}.png')
 
     # Load the image to Content ID map
-    with open(config.PUBLIC_DIR / 'new_membership_email_image_to_cid_map.json') as fh:
-        image_to_cid_map = json.load(fh)
+    try:
+        with open(config.PUBLIC_DIR / 'new_membership_email_image_to_cid_map.json') as fh:
+            image_to_cid_map = json.load(fh)
+    except (OSError, json.JSONDecodeError) as e:
+        log.error(f'Could not load image_to_cid_map: {e}. Email will be sent without embedded images.')
+        image_to_cid_map = []
 
     # Embed the images into the email.
     # We do this so that reading the email does not rely on the server being up.

@@ -38,8 +38,13 @@ class SimpleCache:
             cached_nowcast_dt = self.from_os_safe_iso_timestamp(path.stem.replace(self.file_prefix, ''))
             if (current_dt - cached_nowcast_dt).total_seconds() <= self.max_age_s:
                 log.info(f'{path} is still current, returning it instead of generating.')
-                with path.open('r', encoding='utf-8') as f:
-                    return json.load(f)
+                try:
+                    with path.open('r', encoding='utf-8') as f:
+                        return json.load(f)
+                except (json.JSONDecodeError, OSError) as e:
+                    log.warning(f'Cache file {path} is corrupt or unreadable ({e}); discarding.')
+                    os.remove(path)
+                    return None
 
         log.info(f'{self.name} cache is empty or out of date.')
         self.clear()
