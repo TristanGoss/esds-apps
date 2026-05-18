@@ -3,6 +3,8 @@ FROM python:3.13-slim
 WORKDIR /app
 
 RUN pip install poetry
+# Keep the virtualenv inside the project so appuser can access it after the ownership transfer below
+ENV POETRY_VIRTUALENVS_IN_PROJECT=true
 COPY pyproject.toml poetry.lock /app/
 
 # Install Cairosvg dependencies
@@ -34,6 +36,7 @@ ENV PYTHONPATH=/app/src
 RUN poetry install
 
 RUN groupadd --gid 1001 appuser && useradd --uid 1001 --gid 1001 --no-create-home appuser
+RUN chown -R appuser:appuser /app
 RUN mkdir -p /tmp/esds_cache && chown appuser:appuser /tmp/esds_cache
 USER appuser
 
