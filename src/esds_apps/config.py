@@ -16,19 +16,23 @@ for var_name in [
     'DC_API_TOKEN',
     'GMAIL_APP_EMAIL',
     'GMAIL_APP_PASSWORD',
-    'UI_PASSWORD',
     'PASS2U_API_KEY',
     'DOOR_VOLUNTEERS_TEAM_ID',
+    'GOOGLE_CLIENT_ID',
+    'GOOGLE_CLIENT_SECRET',
+    'GOOGLE_OAUTH_REDIRECT_URI',
+    'GOOGLE_ALLOWED_GROUP_EMAIL',
+    'GOOGLE_ADMIN_IMPERSONATE_EMAIL',
+    'GOOGLE_SERVICE_ACCOUNT_FILE',
 ]:
     if var_name not in SECRETS:
         raise RuntimeError(f'Environment variable {var_name} is missing from the .env file.')
+
 
 IS_CARD_DISTRIBUTION_ENABLED = True
 CARD_DISTRIBUTION_EMAIL_BATCH_SIZE = 20
 AUTH_COOKIE_NAME = 'session'
 AUTH_COOKIE_TIMEOUT_SECONDS = 24 * 60 * 60
-AUTH_MAX_LOGIN_ATTEMPTS = 10
-AUTH_MAX_LOGIN_ATTEMPTS_TIMEOUT_S = 4 * 60 * 60
 
 PUBLIC_DIR = directory = Path(__file__).resolve().parent.parent.parent / 'public'
 TEMPLATES = Jinja2Templates(directory=Path(__file__).resolve().parent.parent.parent / 'templates')

@@ -8,6 +8,7 @@ services:
     volumes:
       # Host directory must be writable by uid 1001 (appuser). Run once: mkdir -p esds_cache && chown 1001:1001 esds_cache
       - ./esds_cache:/tmp/esds_cache
+      - ./esds-group-checker-sa.json:/run/secrets/esds-group-checker-sa.json:ro
 
   nginx:
     image: nginx:stable

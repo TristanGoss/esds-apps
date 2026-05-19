@@ -21,7 +21,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response, Streamin
 from fastapi.staticfiles import StaticFiles
 
 from esds_apps import config
-from esds_apps.auth import password_auth, require_valid_cookie
+from esds_apps.auth import build_login_redirect, handle_oauth_callback, login_required, require_valid_cookie
 from esds_apps.classes import MembershipCardStatus, PrintablePdfError
 from esds_apps.dancecloud_interface import (
     add_pos_permissions,
@@ -112,16 +112,33 @@ async def health():
     return {'status': 'ok'}
 
 
-@app.api_route('/membership-cards', methods=['GET', 'POST'], response_class=HTMLResponse)
-@password_auth
+@app.get('/auth/login')
+async def auth_login(request: Request, next: str = '/'):
+    return build_login_redirect(next)
+
+
+@app.get('/auth/callback')
+async def auth_callback(request: Request):
+    return await handle_oauth_callback(request)
+
+
+@app.get('/auth/logout')
+async def auth_logout():
+    response = RedirectResponse('/', status_code=302)
+    response.delete_cookie(config.AUTH_COOKIE_NAME)
+    return response
+
+
+@app.get('/membership-cards', response_class=HTMLResponse)
+@login_required
 async def membership_cards(request: Request):
     return config.TEMPLATES.TemplateResponse(
         request, 'membership_cards.html', {'cards': await fetch_membership_cards()}
     )
 
 
-@app.api_route('/pos-permissions', methods=['GET', 'POST'], response_class=HTMLResponse)
-@password_auth
+@app.get('/pos-permissions', response_class=HTMLResponse)
+@login_required
 async def pos_permissions(request: Request):
     return config.TEMPLATES.TemplateResponse(
         request, 'pos_permissions.html', {'volunteers': await fetch_pos_permissions()}
@@ -169,8 +186,8 @@ async def proxy_card_check(url: str):
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail='URL not permitted.')
 
 
-@app.api_route('/membership-cards/checks/logs', methods=['GET', 'POST'], response_class=HTMLResponse)
-@password_auth
+@app.get('/membership-cards/checks/logs', response_class=HTMLResponse)
+@login_required
 async def card_scanning_log(request: Request):
     card_checks = await fetch_membership_card_checks()
     checks_in_the_last_30_days = [
@@ -204,8 +221,8 @@ async def card_scanning_log(request: Request):
     )
 
 
-@app.api_route('/membership-cards/checks/download', methods=['GET', 'POST'], response_class=StreamingResponse)
-@password_auth
+@app.get('/membership-cards/checks/download', response_class=StreamingResponse)
+@login_required
 async def download_checks(request: Request, days_ago: int = Query(ge=0)):
     card_checks = await fetch_membership_card_checks()
     rows = sorted(
@@ -237,12 +254,8 @@ async def reissue_card(
     request: Request,
     card_uuid: str,
     reason: MembershipCardStatus = Form(...),
-    confirm_password: str = Form(...),
     _: None = Depends(require_valid_cookie),
 ):
-    if confirm_password != config.SECRETS['UI_PASSWORD']:
-        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail='Incorrect password.')
-
     # find the full details of the card that this UUID refers to
     # Why do this? Because we can only filter on card number,
     # but the dancecloud reissue route wants the card_uuid as an argument.
@@ -263,12 +276,8 @@ async def reissue_card(
 async def cancel_card(
     request: Request,
     card_uuid: str,
-    confirm_password: str = Form(...),
     _: None = Depends(require_valid_cookie),
 ):
-    if confirm_password != config.SECRETS['UI_PASSWORD']:
-        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail='Incorrect password.')
-
     # find the full details of the card that this UUID refers to
     # Why do this? Because we can only filter on card number,
     # but the dancecloud reissue route wants the card_uuid as an argument.
@@ -381,7 +390,7 @@ async def download_selected_cards(  # noqa: PLR0913
 
 # Management UI for tracked QR codes (with creation form)
 @app.api_route('/qr-codes', methods=['GET', 'POST'], response_class=HTMLResponse)
-@password_auth
+@login_required
 async def qr_codes_table(request: Request):
     error = None
     if request.method == 'POST':
@@ -415,7 +424,7 @@ async def qr_codes_table(request: Request):
 
 # Endpoint to serve the QR code image (SVG or PNG)
 @app.get('/qr-codes/{code_id}/qr.{fmt}')
-@password_auth
+@login_required
 async def serve_tracked_qr_code(request: Request, code_id: str, fmt: str):
     qr_info = qr_db.get_qr_code(code_id)
     if not qr_info:
@@ -462,7 +471,7 @@ async def tracked_qr_scan(code_id: str):
 
 # Download scan datetimes as CSV for a QR code
 @app.get('/qr-codes/{code_id}/scans.csv')
-@password_auth
+@login_required
 async def download_qr_code_scans_csv(request: Request, code_id: str):
     qr_info = qr_db.get_qr_code(code_id)
     if not qr_info:

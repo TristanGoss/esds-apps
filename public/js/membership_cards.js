@@ -9,8 +9,6 @@ const printModalClose = document.getElementById("printModalClose");
 const reAuthModal = document.getElementById("reAuthModal");
 const reAuthModalClose = document.getElementById("reAuthModalClose");
 const reAuthForm = document.getElementById("reAuthForm");
-const reAuthPassword = document.getElementById("reAuthPassword");
-const reAuthError = document.getElementById("reAuthError");
 const reAuthReason = document.getElementById("reAuthReason");
 const reAuthModalMessage = document.getElementById("reAuthModalMessage");
 const reAuthModalTitle = document.getElementById("reAuthModalTitle");
@@ -121,16 +119,13 @@ document.addEventListener('change', function (e) {
     button.disabled = !e.target.value;
 });
 
-// Open the re-auth modal configured for the given action, then submit on confirm.
+// Open the confirmation modal for the given action.
 function openReAuthModal(title, message, actionUrl, reason) {
     reAuthModalTitle.textContent = title;
     reAuthModalMessage.textContent = message;
     reAuthForm.action = actionUrl;
     reAuthReason.value = reason || '';
-    reAuthPassword.value = '';
-    reAuthError.style.display = 'none';
     reAuthModal.showModal();
-    reAuthPassword.focus();
 }
 
 // Close re-auth modal.
@@ -156,7 +151,7 @@ document.addEventListener('click', function (e) {
         if (!reason) return;
         openReAuthModal(
             'Confirm Reissue',
-            `You are about to reissue the membership card belonging to ${cardFirstName} because it has been ${reason}. Enter your password to confirm.`,
+            `You are about to reissue the membership card belonging to ${cardFirstName} because it has been ${reason}.`,
             `/membership-cards/${cardUuid}/reissue`,
             reason
         );
@@ -169,7 +164,7 @@ document.addEventListener('click', function (e) {
         const cardFirstName = cancelBtn.dataset.name;
         openReAuthModal(
             'Confirm Cancellation',
-            `You are about to cancel the membership card belonging to ${cardFirstName}. This cannot be undone. Enter your password to confirm.`,
+            `You are about to cancel the membership card belonging to ${cardFirstName}. This cannot be undone.`,
             `/membership-cards/${cardUuid}/cancel`,
             ''
         );

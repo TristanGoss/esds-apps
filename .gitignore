@@ -173,3 +173,7 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Secrets
+esds-group-checker-sa.json
+client_secret*.json
