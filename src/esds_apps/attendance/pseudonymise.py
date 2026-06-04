@@ -5,11 +5,12 @@ import json
 import re
 import secrets
 import sqlite3
-from difflib import SequenceMatcher
+from dataclasses import dataclass
 from pathlib import Path
 
 import openpyxl
 from cryptography.fernet import Fernet, InvalidToken
+from rapidfuzz import fuzz
 
 EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
 NAME_HEADERS = re.compile(
@@ -58,6 +59,32 @@ def _derive_keys(passphrase: str, salt: bytes) -> tuple[bytes, bytes]:
     return base64.urlsafe_b64encode(raw[:32]), raw[32:]
 
 
+def derive_id_key(passphrase: str) -> bytes:
+    """Derive a stable key for dancer ID generation from the passphrase alone (no DB salt).
+
+    Because this key does not depend on the per-database random salt, dancer IDs derived
+    from it are reproducible: the same passphrase and input always produce the same ID,
+    even across freshly created databases. This makes the database reconstructable from the
+    original input files given only the passphrase.
+    """
+    return hashlib.pbkdf2_hmac('sha256', passphrase.encode(), b'esds-dancer-id-v1', 100_000, dklen=32)
+
+
+def _derive_dancer_id(id_key: bytes, primary_key: str) -> str:
+    digest = hmac.new(id_key, primary_key.lower().strip().encode(), 'sha256').hexdigest()
+    return f'DNC-{digest[:8].upper()}'
+
+
+@dataclass
+class DbContext:
+    """Holds all state needed to read and write the pseudonymisation database."""
+
+    conn: sqlite3.Connection
+    fernet: Fernet
+    mac_key: bytes
+    id_key: bytes
+
+
 def _setup_db(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.execute('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)')
@@ -73,8 +100,8 @@ def _setup_db(db_path: Path) -> sqlite3.Connection:
     return conn
 
 
-def open_db(db_path: Path, passphrase: str) -> tuple[sqlite3.Connection, Fernet, bytes]:
-    """Open (or create) the database. Returns (conn, fernet, mac_key).
+def open_db(db_path: Path, passphrase: str) -> DbContext:
+    """Open (or create) the database. Returns a DbContext.
 
     Raises ValueError with a descriptive message if the passphrase is wrong.
     """
@@ -108,7 +135,7 @@ def open_db(db_path: Path, passphrase: str) -> tuple[sqlite3.Connection, Fernet,
         )
         conn.commit()
 
-    return conn, fernet, mac_key
+    return DbContext(conn=conn, fernet=fernet, mac_key=mac_key, id_key=derive_id_key(passphrase))
 
 
 # ---------------------------------------------------------------------------
@@ -143,9 +170,7 @@ def _build_name_updates(  # noqa: PLR0913
 
 
 def get_or_create_dancer_id(
-    conn: sqlite3.Connection,
-    fernet: Fernet,
-    mac_key: bytes,
+    ctx: DbContext,
     name_fields: dict[str, str] | None,
     email_fields: dict[str, str] | None,
 ) -> str:
@@ -157,44 +182,47 @@ def get_or_create_dancer_id(
     found_id = None
     for field, value in [('email_hash', email_key), ('name_hash', name_key)]:
         if value:
-            row = conn.execute(
+            row = ctx.conn.execute(
                 f'SELECT dancer_id FROM pseudonyms WHERE {field}=?',
-                (_value_hash(value, mac_key),),
+                (_value_hash(value, ctx.mac_key),),
             ).fetchone()
             if row:
                 found_id = row[0]
                 break
 
     if found_id:
-        existing_enc_name, existing_enc_email = conn.execute(
+        existing_enc_name, existing_enc_email = ctx.conn.execute(
             'SELECT enc_name, enc_email FROM pseudonyms WHERE dancer_id=?', (found_id,)
         ).fetchone()
-        updates = _build_name_updates(fernet, mac_key, existing_enc_name, name_fields, name_key)
+        updates = _build_name_updates(ctx.fernet, ctx.mac_key, existing_enc_name, name_fields, name_key)
         if existing_enc_email is None and email_fields and email_key:
-            updates['enc_email'] = fernet.encrypt(json.dumps(email_fields).encode()).decode()
-            updates['email_hash'] = _value_hash(email_key, mac_key)
+            updates['enc_email'] = ctx.fernet.encrypt(json.dumps(email_fields).encode()).decode()
+            updates['email_hash'] = _value_hash(email_key, ctx.mac_key)
         if updates:
             set_clause = ', '.join(f'{k}=?' for k in updates)
-            conn.execute(f'UPDATE pseudonyms SET {set_clause} WHERE dancer_id=?', (*updates.values(), found_id))
-            conn.commit()
+            ctx.conn.execute(f'UPDATE pseudonyms SET {set_clause} WHERE dancer_id=?', (*updates.values(), found_id))
+            ctx.conn.commit()
         return found_id
 
-    while True:
-        dancer_id = f'DNC-{secrets.token_hex(4).upper()}'
-        if not conn.execute('SELECT 1 FROM pseudonyms WHERE dancer_id=?', (dancer_id,)).fetchone():
-            break
+    primary_key = email_key or name_key
+    dancer_id = _derive_dancer_id(ctx.id_key, primary_key)
+    if ctx.conn.execute('SELECT 1 FROM pseudonyms WHERE dancer_id=?', (dancer_id,)).fetchone():
+        raise ValueError(
+            f'Dancer ID collision for {dancer_id!r} — two distinct inputs produced the same 8-character prefix. '
+            'This is extremely unlikely; verify that the inputs are genuinely different people.'
+        )
 
-    conn.execute(
+    ctx.conn.execute(
         'INSERT INTO pseudonyms (dancer_id, enc_name, enc_email, name_hash, email_hash) VALUES (?, ?, ?, ?, ?)',
         (
             dancer_id,
-            fernet.encrypt(json.dumps(name_fields).encode()).decode() if name_fields else None,
-            fernet.encrypt(json.dumps(email_fields).encode()).decode() if email_fields else None,
-            _value_hash(name_key, mac_key) if name_key else None,
-            _value_hash(email_key, mac_key) if email_key else None,
+            ctx.fernet.encrypt(json.dumps(name_fields).encode()).decode() if name_fields else None,
+            ctx.fernet.encrypt(json.dumps(email_fields).encode()).decode() if email_fields else None,
+            _value_hash(name_key, ctx.mac_key) if name_key else None,
+            _value_hash(email_key, ctx.mac_key) if email_key else None,
         ),
     )
-    conn.commit()
+    ctx.conn.commit()
     return dancer_id
 
 
@@ -202,20 +230,20 @@ def _decrypt_fields(fernet: Fernet, blob: str | None) -> dict | None:
     return json.loads(fernet.decrypt(blob.encode()).decode()) if blob else None
 
 
-def decrypt_all(conn: sqlite3.Connection, fernet: Fernet) -> list[dict]:
+def decrypt_all(ctx: DbContext) -> list[dict]:
     return [
         {
             'dancer_id': d,
-            'name': _decrypt_fields(fernet, n),
-            'email': _decrypt_fields(fernet, e),
+            'name': _decrypt_fields(ctx.fernet, n),
+            'email': _decrypt_fields(ctx.fernet, e),
         }
-        for d, n, e in conn.execute('SELECT dancer_id, enc_name, enc_email FROM pseudonyms')
+        for d, n, e in ctx.conn.execute('SELECT dancer_id, enc_name, enc_email FROM pseudonyms')
     ]
 
 
-def decrypt_dancer(conn: sqlite3.Connection, fernet: Fernet, dancer_id: str) -> dict | None:
+def decrypt_dancer(ctx: DbContext, dancer_id: str) -> dict | None:
     """Decrypt and return the identity for a single dancer_id, or None if not found."""
-    row = conn.execute(
+    row = ctx.conn.execute(
         'SELECT enc_name, enc_email FROM pseudonyms WHERE dancer_id=?',
         (dancer_id,),
     ).fetchone()
@@ -224,8 +252,8 @@ def decrypt_dancer(conn: sqlite3.Connection, fernet: Fernet, dancer_id: str) -> 
     n, e = row
     return {
         'dancer_id': dancer_id,
-        'name': _decrypt_fields(fernet, n),
-        'email': _decrypt_fields(fernet, e),
+        'name': _decrypt_fields(ctx.fernet, n),
+        'email': _decrypt_fields(ctx.fernet, e),
     }
 
 
@@ -302,12 +330,10 @@ def detect_columns(fieldnames: list[str], rows: list[dict]) -> dict[str, list]:
 # ---------------------------------------------------------------------------
 
 
-def _pseudonymise_sheet(  # noqa: PLR0913
+def _pseudonymise_sheet(
     ws,
     ws_out,
-    conn: sqlite3.Connection,
-    fernet: Fernet,
-    mac_key: bytes,
+    ctx: DbContext,
     name_cols: list | None = None,
     email_cols: list | None = None,
 ) -> tuple[list[dict], int]:
@@ -339,9 +365,9 @@ def _pseudonymise_sheet(  # noqa: PLR0913
         if not name_fields and not email_fields:
             continue
 
-        before = conn.execute('SELECT COUNT(*) FROM pseudonyms').fetchone()[0]
-        dancer_id = get_or_create_dancer_id(conn, fernet, mac_key, name_fields, email_fields)
-        new_count += conn.execute('SELECT COUNT(*) FROM pseudonyms').fetchone()[0] - before
+        before = ctx.conn.execute('SELECT COUNT(*) FROM pseudonyms').fetchone()[0]
+        dancer_id = get_or_create_dancer_id(ctx, name_fields, email_fields)
+        new_count += ctx.conn.execute('SELECT COUNT(*) FROM pseudonyms').fetchone()[0] - before
 
         row[pii_cols[0]] = dancer_id
         for col in pii_cols[1:]:
@@ -369,7 +395,7 @@ def pseudonymise(  # noqa: PLR0913
 
     Processes all sheets. Returns {sheet_name: rows} for each sheet.
     """
-    conn, fernet, mac_key = open_db(db_path, passphrase)
+    ctx = open_db(db_path, passphrase)
     wb = openpyxl.load_workbook(spreadsheet_path)
     wb_out = openpyxl.Workbook()
     wb_out.remove(wb_out.active)
@@ -379,11 +405,11 @@ def pseudonymise(  # noqa: PLR0913
     for ws in wb.worksheets:
         print(f'\nSheet: {ws.title}')
         ws_out = wb_out.create_sheet(ws.title)
-        rows, new_count = _pseudonymise_sheet(ws, ws_out, conn, fernet, mac_key, name_cols, email_cols)
+        rows, new_count = _pseudonymise_sheet(ws, ws_out, ctx, name_cols, email_cols)
         result[ws.title] = rows
         total_new += new_count
 
-    conn.close()
+    ctx.conn.close()
 
     if output_path is None:
         p = Path(spreadsheet_path)
@@ -411,7 +437,7 @@ def pseudonymise_folder(  # noqa: PLR0913
     """
     input_dir = Path(input_dir)
     output_dir = Path(output_dir)
-    conn, fernet, mac_key = open_db(db_path, passphrase)
+    ctx = open_db(db_path, passphrase)
     total_new = 0
 
     for src in sorted(input_dir.rglob('*.xlsx')):
@@ -427,13 +453,13 @@ def pseudonymise_folder(  # noqa: PLR0913
         for ws in wb.worksheets:
             print(f'  Sheet: {ws.title}')
             ws_out = wb_out.create_sheet(ws.title)
-            _, new_count = _pseudonymise_sheet(ws, ws_out, conn, fernet, mac_key, name_cols, email_cols)
+            _, new_count = _pseudonymise_sheet(ws, ws_out, ctx, name_cols, email_cols)
             total_new += new_count
 
         wb_out.save(dst)
         print(f'  → {dst}')
 
-    conn.close()
+    ctx.conn.close()
     print(f'\nTotal new dancer IDs: {total_new}')
 
 
@@ -456,25 +482,28 @@ def _replace_id_in_files(output_dir: Path, old_id: str, new_id: str) -> None:
             wb.save(path)
 
 
-def substitute_dancer_id(  # noqa: PLR0913
-    conn: sqlite3.Connection,
-    fernet: Fernet,
-    mac_key: bytes,
+def substitute_dancer_id(
+    ctx: DbContext,
     old_id: str,
     new_id: str,
     output_dir: Path | None = None,
+    conflict_first_name: str | None = None,
 ) -> None:
     """Replace old_id with new_id in the database and all xlsx files in output_dir.
 
     Merges old_id's name/email into new_id if new_id is missing those fields, then
     deletes old_id. Delete happens before update to avoid UNIQUE constraint conflicts
     when moving a name_hash or email_hash from one row to another.
+
+    When both records have names with differing first names, pass conflict_first_name
+    to store the discarded first name as alt_first_name on new_id. Leave it None to
+    discard it silently.
     """
-    old_row = conn.execute(
+    old_row = ctx.conn.execute(
         'SELECT enc_name, enc_email, name_hash, email_hash FROM pseudonyms WHERE dancer_id=?',
         (old_id,),
     ).fetchone()
-    new_row = conn.execute(
+    new_row = ctx.conn.execute(
         'SELECT enc_name, enc_email, name_hash, email_hash FROM pseudonyms WHERE dancer_id=?',
         (new_id,),
     ).fetchone()
@@ -484,23 +513,28 @@ def substitute_dancer_id(  # noqa: PLR0913
     if new_row is None:
         raise ValueError(f'{new_id!r} not found in database')
 
-    # Capture what we might want to move before deleting old_id.
     name_to_move = (old_row[0], old_row[2]) if new_row[0] is None and old_row[0] is not None else None
     email_to_move = (old_row[1], old_row[3]) if new_row[1] is None and old_row[1] is not None else None
 
     # Delete first so the UNIQUE constraints on name_hash/email_hash are freed.
-    conn.execute('DELETE FROM pseudonyms WHERE dancer_id=?', (old_id,))
+    ctx.conn.execute('DELETE FROM pseudonyms WHERE dancer_id=?', (old_id,))
 
     updates = {}
     if name_to_move:
         updates['enc_name'], updates['name_hash'] = name_to_move
+    elif conflict_first_name is not None and new_row[0] is not None:
+        existing_name = _decrypt_fields(ctx.fernet, new_row[0]) or {}
+        if not existing_name.get('alt_first_name'):
+            updates['enc_name'] = ctx.fernet.encrypt(
+                json.dumps({**existing_name, 'alt_first_name': conflict_first_name}).encode()
+            ).decode()
     if email_to_move:
         updates['enc_email'], updates['email_hash'] = email_to_move
     if updates:
         set_clause = ', '.join(f'{k}=?' for k in updates)
-        conn.execute(f'UPDATE pseudonyms SET {set_clause} WHERE dancer_id=?', (*updates.values(), new_id))
+        ctx.conn.execute(f'UPDATE pseudonyms SET {set_clause} WHERE dancer_id=?', (*updates.values(), new_id))
 
-    conn.commit()
+    ctx.conn.commit()
 
     if output_dir is not None:
         _replace_id_in_files(Path(output_dir), old_id, new_id)
@@ -512,16 +546,15 @@ def substitute_dancer_id(  # noqa: PLR0913
 
 
 def find_duplicate_candidates(
-    conn: sqlite3.Connection,
-    fernet: Fernet,
+    ctx: DbContext,
     threshold: float = 0.8,
 ) -> list[tuple[dict, dict, float]]:
     """Scan the database for pairs of dancers with similar names or emails.
 
-    Uses difflib.SequenceMatcher (stdlib). Returns list of (dancer_a, dancer_b, score)
-    sorted by score descending, where score is the best match across name and email.
+    Returns list of (dancer_a, dancer_b, score) sorted by score descending,
+    where score is the best match across name and email.
     """
-    all_dancers = decrypt_all(conn, fernet)
+    all_dancers = decrypt_all(ctx)
     candidates = []
 
     for i, a in enumerate(all_dancers):
@@ -533,19 +566,19 @@ def find_duplicate_candidates(
             a_full = f'{an.get("first_name", "")} {an.get("last_name", "")}'.strip().lower()
             b_full = f'{bn.get("first_name", "")} {bn.get("last_name", "")}'.strip().lower()
             if a_full and b_full:
-                best = max(best, SequenceMatcher(None, a_full, b_full).ratio())
+                best = max(best, fuzz.ratio(a_full, b_full) / 100)
 
             ae = (a.get('email') or {}).get('email', '').lower()
             be = (b.get('email') or {}).get('email', '').lower()
             if ae and be:
-                best = max(best, SequenceMatcher(None, ae, be).ratio())
+                best = max(best, fuzz.ratio(ae, be) / 100)
 
             ae_local = re.sub(r'[._\-]', ' ', ae.split('@')[0]) if ae else ''
             be_local = re.sub(r'[._\-]', ' ', be.split('@')[0]) if be else ''
             if a_full and be_local:
-                best = max(best, SequenceMatcher(None, a_full, be_local).ratio())
+                best = max(best, fuzz.ratio(a_full, be_local) / 100)
             if b_full and ae_local:
-                best = max(best, SequenceMatcher(None, b_full, ae_local).ratio())
+                best = max(best, fuzz.ratio(b_full, ae_local) / 100)
 
             if best >= threshold:
                 candidates.append((a, b, best))
@@ -554,8 +587,7 @@ def find_duplicate_candidates(
 
 
 def search_dancer(
-    conn: sqlite3.Connection,
-    fernet: Fernet,
+    ctx: DbContext,
     query: str,
     threshold: float = 0.6,
     max_results: int = 10,
@@ -569,7 +601,7 @@ def search_dancer(
     q_local = re.sub(r'[._\-]', ' ', q.split('@')[0]) if '@' in q else q
 
     results = []
-    for dancer in decrypt_all(conn, fernet):
+    for dancer in decrypt_all(ctx):
         n = dancer.get('name') or {}
         full_name = f'{n.get("first_name", "")} {n.get("last_name", "")}'.strip().lower()
         email = (dancer.get('email') or {}).get('email', '').lower()
@@ -577,11 +609,11 @@ def search_dancer(
 
         best = 0.0
         if full_name:
-            best = max(best, SequenceMatcher(None, q, full_name).ratio())
+            best = max(best, fuzz.partial_ratio(q, full_name) / 100)
         if email:
-            best = max(best, SequenceMatcher(None, q, email).ratio())
+            best = max(best, fuzz.partial_ratio(q, email) / 100)
         if email_local:
-            best = max(best, SequenceMatcher(None, q_local, email_local).ratio())
+            best = max(best, fuzz.partial_ratio(q_local, email_local) / 100)
 
         if best >= threshold:
             results.append((dancer, best))

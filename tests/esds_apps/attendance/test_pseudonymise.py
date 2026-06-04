@@ -19,11 +19,11 @@ def tmp_db(tmp_path):
 
 
 @pytest.fixture
-def opened_db(tmp_db):
-    """Open a fresh DB and yield (conn, fernet, mac_key), closing on teardown."""
-    conn, fernet, mac_key = pseudonymise.open_db(tmp_db, PASSPHRASE)
-    yield conn, fernet, mac_key
-    conn.close()
+def ctx(tmp_db):
+    """Open a fresh DB and yield a DbContext, closing on teardown."""
+    c = pseudonymise.open_db(tmp_db, PASSPHRASE)
+    yield c
+    c.conn.close()
 
 
 @pytest.fixture
@@ -87,6 +87,14 @@ def test_derive_keys_differs_with_different_salt():
     assert mac1 != mac2
 
 
+def test_derive_id_key_deterministic():
+    assert pseudonymise.derive_id_key(PASSPHRASE) == pseudonymise.derive_id_key(PASSPHRASE)
+
+
+def test_derive_id_key_differs_with_different_passphrase():
+    assert pseudonymise.derive_id_key(PASSPHRASE) != pseudonymise.derive_id_key('other-passphrase')
+
+
 # ============================================================================
 # Database setup and passphrase validation
 # ============================================================================
@@ -101,29 +109,37 @@ def test_setup_db_creates_tables(tmp_db):
 
 def test_open_db_creates_file(tmp_db):
     assert not tmp_db.exists()
-    conn, _, _ = pseudonymise.open_db(tmp_db, PASSPHRASE)
-    conn.close()
+    c = pseudonymise.open_db(tmp_db, PASSPHRASE)
+    c.conn.close()
     assert tmp_db.exists()
 
 
+def test_open_db_returns_dbcontext(tmp_db):
+    c = pseudonymise.open_db(tmp_db, PASSPHRASE)
+    assert isinstance(c, pseudonymise.DbContext)
+    c.conn.close()
+
+
 def test_open_db_stores_salt(tmp_db):
-    conn, _, _ = pseudonymise.open_db(tmp_db, PASSPHRASE)
-    salt_row = conn.execute('SELECT value FROM meta WHERE key="salt"').fetchone()
-    conn.close()
+    c = pseudonymise.open_db(tmp_db, PASSPHRASE)
+    salt_row = c.conn.execute('SELECT value FROM meta WHERE key="salt"').fetchone()
+    c.conn.close()
     assert salt_row is not None
 
 
 def test_open_db_reuses_salt_across_opens(tmp_db):
-    conn1, _, mac_key1 = pseudonymise.open_db(tmp_db, PASSPHRASE)
-    conn1.close()
-    conn2, _, mac_key2 = pseudonymise.open_db(tmp_db, PASSPHRASE)
-    conn2.close()
-    assert mac_key1 == mac_key2
+    c1 = pseudonymise.open_db(tmp_db, PASSPHRASE)
+    mac1 = c1.mac_key
+    c1.conn.close()
+    c2 = pseudonymise.open_db(tmp_db, PASSPHRASE)
+    mac2 = c2.mac_key
+    c2.conn.close()
+    assert mac1 == mac2
 
 
 def test_open_db_wrong_passphrase_raises(tmp_db):
-    conn, _, _ = pseudonymise.open_db(tmp_db, PASSPHRASE)
-    conn.close()
+    c = pseudonymise.open_db(tmp_db, PASSPHRASE)
+    c.conn.close()
     with pytest.raises(ValueError, match='Wrong passphrase'):
         pseudonymise.open_db(tmp_db, 'wrong-passphrase')
 
@@ -133,24 +149,20 @@ def test_open_db_wrong_passphrase_raises(tmp_db):
 # ============================================================================
 
 
-def test_value_hash_consistent(opened_db):
-    _, _, mac_key = opened_db
-    assert pseudonymise._value_hash('Alice Smith', mac_key) == pseudonymise._value_hash('Alice Smith', mac_key)
+def test_value_hash_consistent(ctx):
+    assert pseudonymise._value_hash('Alice Smith', ctx.mac_key) == pseudonymise._value_hash('Alice Smith', ctx.mac_key)
 
 
-def test_value_hash_case_insensitive(opened_db):
-    _, _, mac_key = opened_db
-    assert pseudonymise._value_hash('alice smith', mac_key) == pseudonymise._value_hash('ALICE SMITH', mac_key)
+def test_value_hash_case_insensitive(ctx):
+    assert pseudonymise._value_hash('alice smith', ctx.mac_key) == pseudonymise._value_hash('ALICE SMITH', ctx.mac_key)
 
 
-def test_value_hash_strips_whitespace(opened_db):
-    _, _, mac_key = opened_db
-    assert pseudonymise._value_hash('Alice', mac_key) == pseudonymise._value_hash('  Alice  ', mac_key)
+def test_value_hash_strips_whitespace(ctx):
+    assert pseudonymise._value_hash('Alice', ctx.mac_key) == pseudonymise._value_hash('  Alice  ', ctx.mac_key)
 
 
-def test_value_hash_differs_for_different_values(opened_db):
-    _, _, mac_key = opened_db
-    assert pseudonymise._value_hash('Alice', mac_key) != pseudonymise._value_hash('Bob', mac_key)
+def test_value_hash_differs_for_different_values(ctx):
+    assert pseudonymise._value_hash('Alice', ctx.mac_key) != pseudonymise._value_hash('Bob', ctx.mac_key)
 
 
 # ============================================================================
@@ -209,12 +221,9 @@ def test_valid_name_rejects_digits():
 # ============================================================================
 
 
-def test_get_or_create_dancer_id_format(opened_db):
-    conn, fernet, mac_key = opened_db
+def test_get_or_create_dancer_id_format(ctx):
     did = pseudonymise.get_or_create_dancer_id(
-        conn,
-        fernet,
-        mac_key,
+        ctx,
         {'first_name': 'Alice', 'last_name': 'Smith'},
         {'email': 'alice@example.com'},
     )
@@ -222,117 +231,137 @@ def test_get_or_create_dancer_id_format(opened_db):
     assert len(did) == 12  # 'DNC-' + 8 hex chars
 
 
-def test_get_or_create_dancer_id_deduplicates_by_email(opened_db):
-    conn, fernet, mac_key = opened_db
+def test_get_or_create_dancer_id_deduplicates_by_email(ctx):
     alice = {'first_name': 'Alice', 'last_name': 'Smith'}
     alicia = {'first_name': 'Alicia', 'last_name': 'Schmidt'}
     email = {'email': 'alice@example.com'}
-    id1 = pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, alice, email)
-    id2 = pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, alicia, email)
+    id1 = pseudonymise.get_or_create_dancer_id(ctx, alice, email)
+    id2 = pseudonymise.get_or_create_dancer_id(ctx, alicia, email)
     assert id1 == id2
 
 
-def test_get_or_create_dancer_id_deduplicates_by_name(opened_db):
-    conn, fernet, mac_key = opened_db
+def test_get_or_create_dancer_id_deduplicates_by_name(ctx):
     bob = {'first_name': 'Bob', 'last_name': 'Jones'}
-    id1 = pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, bob, {'email': 'bob1@example.com'})
-    id2 = pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, bob, {'email': 'bob2@example.com'})
+    id1 = pseudonymise.get_or_create_dancer_id(ctx, bob, {'email': 'bob1@example.com'})
+    id2 = pseudonymise.get_or_create_dancer_id(ctx, bob, {'email': 'bob2@example.com'})
     assert id1 == id2
 
 
-def test_get_or_create_dancer_id_distinct_people(opened_db):
-    conn, fernet, mac_key = opened_db
+def test_get_or_create_dancer_id_distinct_people(ctx):
     alice = {'first_name': 'Alice', 'last_name': 'Smith'}
     bob = {'first_name': 'Bob', 'last_name': 'Jones'}
-    id1 = pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, alice, {'email': 'alice@example.com'})
-    id2 = pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, bob, {'email': 'bob@example.com'})
+    id1 = pseudonymise.get_or_create_dancer_id(ctx, alice, {'email': 'alice@example.com'})
+    id2 = pseudonymise.get_or_create_dancer_id(ctx, bob, {'email': 'bob@example.com'})
     assert id1 != id2
 
 
 _SELECT_ENC = 'SELECT enc_name, enc_email FROM pseudonyms WHERE dancer_id=?'
 
 
-def test_get_or_create_dancer_id_name_only(opened_db):
-    conn, fernet, mac_key = opened_db
+def test_get_or_create_dancer_id_name_only(ctx):
     alice = {'first_name': 'Alice', 'last_name': 'Smith'}
-    did = pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, alice, None)
+    did = pseudonymise.get_or_create_dancer_id(ctx, alice, None)
     assert did.startswith('DNC-')
-    enc_name, enc_email = conn.execute(_SELECT_ENC, (did,)).fetchone()
+    enc_name, enc_email = ctx.conn.execute(_SELECT_ENC, (did,)).fetchone()
     assert enc_name is not None
     assert enc_email is None
 
 
-def test_get_or_create_dancer_id_email_only(opened_db):
-    conn, fernet, mac_key = opened_db
-    did = pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, None, {'email': 'anon@example.com'})
+def test_get_or_create_dancer_id_email_only(ctx):
+    did = pseudonymise.get_or_create_dancer_id(ctx, None, {'email': 'anon@example.com'})
     assert did.startswith('DNC-')
-    enc_name, enc_email = conn.execute(_SELECT_ENC, (did,)).fetchone()
+    enc_name, enc_email = ctx.conn.execute(_SELECT_ENC, (did,)).fetchone()
     assert enc_name is None
     assert enc_email is not None
 
 
-def test_get_or_create_dancer_id_stores_json(opened_db):
-    conn, fernet, mac_key = opened_db
+def test_get_or_create_dancer_id_stores_json(ctx):
     name_fields = {'first_name': 'Alice', 'last_name': 'Smith'}
     email_fields = {'email': 'alice@example.com'}
-    did = pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, name_fields, email_fields)
-    enc_name, enc_email = conn.execute(_SELECT_ENC, (did,)).fetchone()
-    assert json.loads(fernet.decrypt(enc_name.encode())) == name_fields
-    assert json.loads(fernet.decrypt(enc_email.encode())) == email_fields
+    did = pseudonymise.get_or_create_dancer_id(ctx, name_fields, email_fields)
+    enc_name, enc_email = ctx.conn.execute(_SELECT_ENC, (did,)).fetchone()
+    assert json.loads(ctx.fernet.decrypt(enc_name.encode())) == name_fields
+    assert json.loads(ctx.fernet.decrypt(enc_email.encode())) == email_fields
 
 
-def test_get_or_create_updates_missing_name(opened_db):
+def test_get_or_create_updates_missing_name(ctx):
     """If dancer was found by email but had no name, name should be filled in."""
-    conn, fernet, mac_key = opened_db
-    did = pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, None, {'email': 'alice@example.com'})
+    did = pseudonymise.get_or_create_dancer_id(ctx, None, {'email': 'alice@example.com'})
     pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
     )
-    result = pseudonymise.decrypt_dancer(conn, fernet, did)
+    result = pseudonymise.decrypt_dancer(ctx, did)
     assert result['name'] == {'first_name': 'Alice', 'last_name': 'Smith'}
 
 
-def test_get_or_create_updates_missing_email(opened_db):
+def test_get_or_create_updates_missing_email(ctx):
     """If dancer was found by name but had no email, email should be filled in."""
-    conn, fernet, mac_key = opened_db
-    did = pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, None
-    )
+    did = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
     pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
     )
-    result = pseudonymise.decrypt_dancer(conn, fernet, did)
+    result = pseudonymise.decrypt_dancer(ctx, did)
     assert result['email'] == {'email': 'alice@example.com'}
 
 
-def test_get_or_create_stores_alt_first_name(opened_db):
+def test_get_or_create_stores_alt_first_name(ctx):
     """Same email, different first name → alt_first_name stored on existing record."""
-    conn, fernet, mac_key = opened_db
     did = pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
     )
     pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Xiaoling', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+        ctx, {'first_name': 'Xiaoling', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
     )
-    result = pseudonymise.decrypt_dancer(conn, fernet, did)
+    result = pseudonymise.decrypt_dancer(ctx, did)
     assert result['name']['first_name'] == 'Alice'
     assert result['name'].get('alt_first_name') == 'Xiaoling'
 
 
-def test_get_or_create_alt_first_name_not_overwritten(opened_db):
+def test_get_or_create_alt_first_name_not_overwritten(ctx):
     """alt_first_name is only written once; a third name doesn't overwrite it."""
-    conn, fernet, mac_key = opened_db
     did = pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
     )
     pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Xiaoling', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+        ctx, {'first_name': 'Xiaoling', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
     )
     pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Xiao', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+        ctx, {'first_name': 'Xiao', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
     )
-    result = pseudonymise.decrypt_dancer(conn, fernet, did)
+    result = pseudonymise.decrypt_dancer(ctx, did)
     assert result['name']['alt_first_name'] == 'Xiaoling'  # not overwritten by 'Xiao'
+
+
+def test_dancer_id_stable_across_fresh_dbs(tmp_path):
+    """Same passphrase and input produces the same dancer ID in a freshly created DB."""
+    name = {'first_name': 'Alice', 'last_name': 'Smith'}
+    email = {'email': 'alice@example.com'}
+
+    ctx1 = pseudonymise.open_db(tmp_path / 'db1.sqlite', PASSPHRASE)
+    id1 = pseudonymise.get_or_create_dancer_id(ctx1, name, email)
+    ctx1.conn.close()
+
+    ctx2 = pseudonymise.open_db(tmp_path / 'db2.sqlite', PASSPHRASE)
+    id2 = pseudonymise.get_or_create_dancer_id(ctx2, name, email)
+    ctx2.conn.close()
+
+    assert id1 == id2
+
+
+def test_dancer_id_differs_with_different_passphrase(tmp_path):
+    """Different passphrases produce different dancer IDs for the same input."""
+    name = {'first_name': 'Alice', 'last_name': 'Smith'}
+    email = {'email': 'alice@example.com'}
+
+    ctx1 = pseudonymise.open_db(tmp_path / 'db1.sqlite', PASSPHRASE)
+    id1 = pseudonymise.get_or_create_dancer_id(ctx1, name, email)
+    ctx1.conn.close()
+
+    ctx2 = pseudonymise.open_db(tmp_path / 'db2.sqlite', 'different-passphrase')
+    id2 = pseudonymise.get_or_create_dancer_id(ctx2, name, email)
+    ctx2.conn.close()
+
+    assert id1 != id2
 
 
 # ============================================================================
@@ -340,15 +369,12 @@ def test_get_or_create_alt_first_name_not_overwritten(opened_db):
 # ============================================================================
 
 
-def test_decrypt_all_returns_canonical_dicts(opened_db):
-    conn, fernet, mac_key = opened_db
+def test_decrypt_all_returns_canonical_dicts(ctx):
     pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
     )
-    pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Bob', 'last_name': 'Jones'}, {'email': 'bob@example.com'}
-    )
-    results = pseudonymise.decrypt_all(conn, fernet)
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Bob', 'last_name': 'Jones'}, {'email': 'bob@example.com'})
+    results = pseudonymise.decrypt_all(ctx)
     assert len(results) == 2
     names = {r['name']['first_name'] for r in results}
     assert names == {'Alice', 'Bob'}
@@ -358,28 +384,23 @@ def test_decrypt_all_returns_canonical_dicts(opened_db):
         assert 'email' in r['email']
 
 
-def test_decrypt_dancer_found(opened_db):
-    conn, fernet, mac_key = opened_db
+def test_decrypt_dancer_found(ctx):
     did = pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
     )
-    result = pseudonymise.decrypt_dancer(conn, fernet, did)
+    result = pseudonymise.decrypt_dancer(ctx, did)
     assert result['dancer_id'] == did
     assert result['name'] == {'first_name': 'Alice', 'last_name': 'Smith'}
     assert result['email'] == {'email': 'alice@example.com'}
 
 
-def test_decrypt_dancer_not_found(opened_db):
-    conn, fernet, _ = opened_db
-    assert pseudonymise.decrypt_dancer(conn, fernet, 'DNC-NONEXIST') is None
+def test_decrypt_dancer_not_found(ctx):
+    assert pseudonymise.decrypt_dancer(ctx, 'DNC-NONEXIST') is None
 
 
-def test_decrypt_dancer_null_email(opened_db):
-    conn, fernet, mac_key = opened_db
-    did = pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, None
-    )
-    result = pseudonymise.decrypt_dancer(conn, fernet, did)
+def test_decrypt_dancer_null_email(ctx):
+    did = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+    result = pseudonymise.decrypt_dancer(ctx, did)
     assert result['email'] is None
     assert result['name']['first_name'] == 'Alice'
 
@@ -627,9 +648,9 @@ def test_pseudonymise_skips_footer_text(tmp_path):
     rows = result['Sheet1']
     assert rows[0]['First Name'].startswith('DNC-')
     assert rows[1]['First Name'] == 'This list is correct as of 01/01/2024'
-    conn, fernet, _ = pseudonymise.open_db(db, PASSPHRASE)
-    assert len(pseudonymise.decrypt_all(conn, fernet)) == 1
-    conn.close()
+    c = pseudonymise.open_db(db, PASSPHRASE)
+    assert len(pseudonymise.decrypt_all(c)) == 1
+    c.conn.close()
 
 
 def test_pseudonymise_manual_column_override(tmp_path):
@@ -714,9 +735,9 @@ def test_pseudonymise_folder_shared_db(tmp_path, simple_xlsx):
     output_dir = tmp_path / 'out'
     pseudonymise.pseudonymise_folder(input_dir, output_dir, db, PASSPHRASE)
     # Only the unique people from simple_xlsx (Alice, Bob) should be in the DB.
-    conn, fernet, _ = pseudonymise.open_db(db, PASSPHRASE)
-    assert len(pseudonymise.decrypt_all(conn, fernet)) == 2
-    conn.close()
+    c = pseudonymise.open_db(db, PASSPHRASE)
+    assert len(pseudonymise.decrypt_all(c)) == 2
+    c.conn.close()
 
 
 # ============================================================================
@@ -724,58 +745,67 @@ def test_pseudonymise_folder_shared_db(tmp_path, simple_xlsx):
 # ============================================================================
 
 
-def test_substitute_removes_old_id(opened_db):
-    conn, fernet, mac_key = opened_db
-    id1 = pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, None
-    )
+def test_substitute_removes_old_id(ctx):
+    id1 = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
     id2 = pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Alicia', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+        ctx, {'first_name': 'Alicia', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
     )
-    pseudonymise.substitute_dancer_id(conn, fernet, mac_key, id1, id2)
-    assert pseudonymise.decrypt_dancer(conn, fernet, id1) is None
+    pseudonymise.substitute_dancer_id(ctx, id1, id2)
+    assert pseudonymise.decrypt_dancer(ctx, id1) is None
 
 
-def test_substitute_merges_name_into_new(opened_db):
+def test_substitute_merges_name_into_new(ctx):
     """old_id has name, new_id has email only → name moves to new_id."""
-    conn, fernet, mac_key = opened_db
-    id1 = pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, None
-    )
-    id2 = pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, None, {'email': 'alice@example.com'})
-    pseudonymise.substitute_dancer_id(conn, fernet, mac_key, id1, id2)
-    result = pseudonymise.decrypt_dancer(conn, fernet, id2)
+    id1 = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+    id2 = pseudonymise.get_or_create_dancer_id(ctx, None, {'email': 'alice@example.com'})
+    pseudonymise.substitute_dancer_id(ctx, id1, id2)
+    result = pseudonymise.decrypt_dancer(ctx, id2)
     assert result['name'] == {'first_name': 'Alice', 'last_name': 'Smith'}
     assert result['email'] == {'email': 'alice@example.com'}
 
 
-def test_substitute_does_not_overwrite_existing_fields(opened_db):
+def test_substitute_does_not_overwrite_existing_fields(ctx):
     """new_id already has a name — old_id's name should not overwrite it."""
-    conn, fernet, mac_key = opened_db
-    id1 = pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'OldName', 'last_name': 'X'}, None)
+    id1 = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'OldName', 'last_name': 'X'}, None)
     id2 = pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'NewName', 'last_name': 'Y'}, {'email': 'x@example.com'}
+        ctx, {'first_name': 'NewName', 'last_name': 'Y'}, {'email': 'x@example.com'}
     )
-    pseudonymise.substitute_dancer_id(conn, fernet, mac_key, id1, id2)
-    result = pseudonymise.decrypt_dancer(conn, fernet, id2)
+    pseudonymise.substitute_dancer_id(ctx, id1, id2)
+    result = pseudonymise.decrypt_dancer(ctx, id2)
     assert result['name']['first_name'] == 'NewName'
 
 
-def test_substitute_raises_for_missing_id(opened_db):
-    conn, fernet, mac_key = opened_db
+def test_substitute_stores_alt_first_name_when_explicitly_passed(ctx):
+    """conflict_first_name is stored as alt_first_name on new_id when provided."""
     id1 = pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, None
+        ctx, {'first_name': 'Mei', 'last_name': 'Chen'}, {'email': 'mei.chen@example.com'}
     )
+    id2 = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Mary', 'last_name': 'Chen'}, None)
+    pseudonymise.substitute_dancer_id(ctx, id1, id2, conflict_first_name='Mei')
+    result = pseudonymise.decrypt_dancer(ctx, id2)
+    assert result['name']['first_name'] == 'Mary'
+    assert result['name']['alt_first_name'] == 'Mei'
+
+
+def test_substitute_discards_conflict_first_name_by_default(ctx):
+    """Without conflict_first_name, differing first names are silently dropped."""
+    id1 = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Mei', 'last_name': 'Chen'}, None)
+    id2 = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Mary', 'last_name': 'Chen'}, None)
+    pseudonymise.substitute_dancer_id(ctx, id1, id2)
+    result = pseudonymise.decrypt_dancer(ctx, id2)
+    assert result['name']['first_name'] == 'Mary'
+    assert 'alt_first_name' not in result['name']
+
+
+def test_substitute_raises_for_missing_id(ctx):
+    id1 = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
     with pytest.raises(ValueError):
-        pseudonymise.substitute_dancer_id(conn, fernet, mac_key, id1, 'DNC-NOTEXIST')
+        pseudonymise.substitute_dancer_id(ctx, id1, 'DNC-NOTEXIST')
 
 
-def test_substitute_rewrites_xlsx_files(tmp_path, opened_db):
-    conn, fernet, mac_key = opened_db
-    id1 = pseudonymise.get_or_create_dancer_id(
-        conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, None
-    )
-    id2 = pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, None, {'email': 'alice@example.com'})
+def test_substitute_rewrites_xlsx_files(tmp_path, ctx):
+    id1 = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+    id2 = pseudonymise.get_or_create_dancer_id(ctx, None, {'email': 'alice@example.com'})
 
     # Write an xlsx that contains id1.
     p = tmp_path / 'out.xlsx'
@@ -785,7 +815,7 @@ def test_substitute_rewrites_xlsx_files(tmp_path, opened_db):
     ws.append([id1, 'something'])
     wb.save(p)
 
-    pseudonymise.substitute_dancer_id(conn, fernet, mac_key, id1, id2, output_dir=tmp_path)
+    pseudonymise.substitute_dancer_id(ctx, id1, id2, output_dir=tmp_path)
 
     wb2 = openpyxl.load_workbook(p)
     values = [row[0].value for row in wb2.active.iter_rows()]
@@ -798,48 +828,43 @@ def test_substitute_rewrites_xlsx_files(tmp_path, opened_db):
 # ============================================================================
 
 
-def test_find_duplicate_candidates_finds_similar_names(opened_db):
-    conn, fernet, mac_key = opened_db
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smyth'}, None)
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Bob', 'last_name': 'Jones'}, None)
-    candidates = pseudonymise.find_duplicate_candidates(conn, fernet, threshold=0.7)
+def test_find_duplicate_candidates_finds_similar_names(ctx):
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smyth'}, None)
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Bob', 'last_name': 'Jones'}, None)
+    candidates = pseudonymise.find_duplicate_candidates(ctx, threshold=0.7)
     last_names = {(c[0]['name']['last_name'], c[1]['name']['last_name']) for c in candidates}
     assert ('Smith', 'Smyth') in last_names or ('Smyth', 'Smith') in last_names
 
 
-def test_find_duplicate_candidates_sorted_by_score(opened_db):
-    conn, fernet, mac_key = opened_db
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smyth'}, None)
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Ali', 'last_name': 'Smit'}, None)
-    candidates = pseudonymise.find_duplicate_candidates(conn, fernet, threshold=0.5)
+def test_find_duplicate_candidates_sorted_by_score(ctx):
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smyth'}, None)
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Ali', 'last_name': 'Smit'}, None)
+    candidates = pseudonymise.find_duplicate_candidates(ctx, threshold=0.5)
     scores = [c[2] for c in candidates]
     assert scores == sorted(scores, reverse=True)
 
 
-def test_find_duplicate_candidates_finds_similar_emails(opened_db):
-    conn, fernet, mac_key = opened_db
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, None, {'email': 'alice.smith@example.com'})
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, None, {'email': 'alice.smyth@example.com'})
-    candidates = pseudonymise.find_duplicate_candidates(conn, fernet, threshold=0.8)
+def test_find_duplicate_candidates_finds_similar_emails(ctx):
+    pseudonymise.get_or_create_dancer_id(ctx, None, {'email': 'alice.smith@example.com'})
+    pseudonymise.get_or_create_dancer_id(ctx, None, {'email': 'alice.smyth@example.com'})
+    candidates = pseudonymise.find_duplicate_candidates(ctx, threshold=0.8)
     assert len(candidates) == 1
 
 
-def test_find_duplicate_candidates_no_false_positives(opened_db):
-    conn, fernet, mac_key = opened_db
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Bob', 'last_name': 'Jones'}, None)
-    candidates = pseudonymise.find_duplicate_candidates(conn, fernet, threshold=0.9)
+def test_find_duplicate_candidates_no_false_positives(ctx):
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Bob', 'last_name': 'Jones'}, None)
+    candidates = pseudonymise.find_duplicate_candidates(ctx, threshold=0.9)
     assert len(candidates) == 0
 
 
-def test_find_duplicate_candidates_name_vs_email_local(opened_db):
-    conn, fernet, mac_key = opened_db
+def test_find_duplicate_candidates_name_vs_email_local(ctx):
     # One record has only a name; the other has only an email whose local part encodes the same name.
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Chris', 'last_name': 'Leeson'}, None)
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, None, {'email': 'chris.leeson@example.com'})
-    candidates = pseudonymise.find_duplicate_candidates(conn, fernet, threshold=0.8)
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Chris', 'last_name': 'Leeson'}, None)
+    pseudonymise.get_or_create_dancer_id(ctx, None, {'email': 'chris.leeson@example.com'})
+    candidates = pseudonymise.find_duplicate_candidates(ctx, threshold=0.8)
     assert len(candidates) == 1
 
 
@@ -848,45 +873,46 @@ def test_find_duplicate_candidates_name_vs_email_local(opened_db):
 # ============================================================================
 
 
-def test_search_dancer_finds_by_name(opened_db):
-    conn, fernet, mac_key = opened_db
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Bob', 'last_name': 'Jones'}, None)
-    results = pseudonymise.search_dancer(conn, fernet, 'alice smith', threshold=0.7)
+def test_search_dancer_finds_by_name(ctx):
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Bob', 'last_name': 'Jones'}, None)
+    results = pseudonymise.search_dancer(ctx, 'alice smith', threshold=0.9)
     assert len(results) == 1
     assert results[0][0]['name']['first_name'] == 'Alice'
 
 
-def test_search_dancer_finds_by_email_local(opened_db):
-    conn, fernet, mac_key = opened_db
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, None, {'email': 'alice.smith@example.com'})
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, None, {'email': 'bob.jones@example.com'})
-    results = pseudonymise.search_dancer(conn, fernet, 'alice smith', threshold=0.7)
+def test_search_dancer_partial_query_scores_high(ctx):
+    """A prefix query should score ~1.0 via partial ratio, not be penalised for length."""
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+    results = pseudonymise.search_dancer(ctx, 'alice', threshold=0.9)
+    assert len(results) == 1
+    assert results[0][1] >= 0.9
+
+
+def test_search_dancer_finds_by_email_local(ctx):
+    pseudonymise.get_or_create_dancer_id(ctx, None, {'email': 'alice.smith@example.com'})
+    pseudonymise.get_or_create_dancer_id(ctx, None, {'email': 'bob.jones@example.com'})
+    results = pseudonymise.search_dancer(ctx, 'alice smith', threshold=0.9)
     assert len(results) == 1
     assert results[0][0]['email']['email'] == 'alice.smith@example.com'
 
 
-def test_search_dancer_sorted_by_score(opened_db):
-    conn, fernet, mac_key = opened_db
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Ali', 'last_name': 'Smit'}, None)
-    results = pseudonymise.search_dancer(conn, fernet, 'alice smith', threshold=0.5)
+def test_search_dancer_sorted_by_score(ctx):
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Ali', 'last_name': 'Smit'}, None)
+    results = pseudonymise.search_dancer(ctx, 'alice smith', threshold=0.5)
     assert len(results) == 2
     assert results[0][1] >= results[1][1]
 
 
-def test_search_dancer_max_results(opened_db):
-    conn, fernet, mac_key = opened_db
+def test_search_dancer_max_results(ctx):
     for i in range(5):
-        pseudonymise.get_or_create_dancer_id(
-            conn, fernet, mac_key, {'first_name': f'Alice{i}', 'last_name': 'Smith'}, None
-        )
-    results = pseudonymise.search_dancer(conn, fernet, 'alice smith', threshold=0.5, max_results=3)
+        pseudonymise.get_or_create_dancer_id(ctx, {'first_name': f'Alice{i}', 'last_name': 'Smith'}, None)
+    results = pseudonymise.search_dancer(ctx, 'alice smith', threshold=0.5, max_results=3)
     assert len(results) <= 3
 
 
-def test_search_dancer_no_results(opened_db):
-    conn, fernet, mac_key = opened_db
-    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Bob', 'last_name': 'Jones'}, None)
-    results = pseudonymise.search_dancer(conn, fernet, 'zzz', threshold=0.9)
+def test_search_dancer_no_results(ctx):
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Bob', 'last_name': 'Jones'}, None)
+    results = pseudonymise.search_dancer(ctx, 'zzz', threshold=0.9)
     assert results == []
