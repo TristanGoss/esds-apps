@@ -177,3 +177,7 @@ cython_debug/
 # Secrets
 esds-group-checker-sa.json
 client_secret*.json
+
+# Working files and databases
+working/
+*.sqlite
