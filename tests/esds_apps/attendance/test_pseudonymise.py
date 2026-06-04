@@ -524,6 +524,34 @@ def test_detect_columns_email_by_content(tmp_path):
     assert 'Contact' in detected['email_cols']
 
 
+def test_detect_columns_member_exact_only(tmp_path):
+    """'Member' alone is a valid name column; adjacent words disqualify it."""
+    p = tmp_path / 't.xlsx'
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(['Member', 'Concession / Member?', 'Paid as member', 'Paid as non-member', 'Member 2022'])
+    ws.append(['Alice Smith', 'No', 'Yes', 'No', 'Yes'])
+    wb.save(p)
+    wb2 = openpyxl.load_workbook(p)
+    fieldnames, rows, _ = pseudonymise._read_sheet(wb2.active)
+    detected = pseudonymise.detect_columns(fieldnames, rows)
+    assert detected['name_cols'] == ['Member']
+
+
+def test_detect_columns_email_false_positives(tmp_path):
+    """Columns where 'email' is a modifier word, not the column type."""
+    p = tmp_path / 't.xlsx'
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(['Email', 'Email subscriber status', 'email present in Wix Export?'])
+    ws.append(['a@b.com', 'subscribed', 'Yes'])
+    wb.save(p)
+    wb2 = openpyxl.load_workbook(p)
+    fieldnames, rows, _ = pseudonymise._read_sheet(wb2.active)
+    detected = pseudonymise.detect_columns(fieldnames, rows)
+    assert detected['email_cols'] == ['Email']
+
+
 def test_detect_columns_content_sniff_max_5_rows(tmp_path):
     """Emails appearing only after row 5 should not trigger content detection."""
     p = tmp_path / 'late.xlsx'
@@ -813,3 +841,52 @@ def test_find_duplicate_candidates_name_vs_email_local(opened_db):
     pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, None, {'email': 'chris.leeson@example.com'})
     candidates = pseudonymise.find_duplicate_candidates(conn, fernet, threshold=0.8)
     assert len(candidates) == 1
+
+
+# ============================================================================
+# Dancer search
+# ============================================================================
+
+
+def test_search_dancer_finds_by_name(opened_db):
+    conn, fernet, mac_key = opened_db
+    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Bob', 'last_name': 'Jones'}, None)
+    results = pseudonymise.search_dancer(conn, fernet, 'alice smith', threshold=0.7)
+    assert len(results) == 1
+    assert results[0][0]['name']['first_name'] == 'Alice'
+
+
+def test_search_dancer_finds_by_email_local(opened_db):
+    conn, fernet, mac_key = opened_db
+    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, None, {'email': 'alice.smith@example.com'})
+    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, None, {'email': 'bob.jones@example.com'})
+    results = pseudonymise.search_dancer(conn, fernet, 'alice smith', threshold=0.7)
+    assert len(results) == 1
+    assert results[0][0]['email']['email'] == 'alice.smith@example.com'
+
+
+def test_search_dancer_sorted_by_score(opened_db):
+    conn, fernet, mac_key = opened_db
+    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Ali', 'last_name': 'Smit'}, None)
+    results = pseudonymise.search_dancer(conn, fernet, 'alice smith', threshold=0.5)
+    assert len(results) == 2
+    assert results[0][1] >= results[1][1]
+
+
+def test_search_dancer_max_results(opened_db):
+    conn, fernet, mac_key = opened_db
+    for i in range(5):
+        pseudonymise.get_or_create_dancer_id(
+            conn, fernet, mac_key, {'first_name': f'Alice{i}', 'last_name': 'Smith'}, None
+        )
+    results = pseudonymise.search_dancer(conn, fernet, 'alice smith', threshold=0.5, max_results=3)
+    assert len(results) <= 3
+
+
+def test_search_dancer_no_results(opened_db):
+    conn, fernet, mac_key = opened_db
+    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Bob', 'last_name': 'Jones'}, None)
+    results = pseudonymise.search_dancer(conn, fernet, 'zzz', threshold=0.9)
+    assert results == []

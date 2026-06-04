@@ -13,10 +13,11 @@ from cryptography.fernet import Fernet, InvalidToken
 
 EMAIL_RE = re.compile(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$')
 NAME_HEADERS = re.compile(
-    r'\b(name|first[_\s-]?name|last[_\s-]?name|surname|forename|full[_\s-]?name|member)\b',
+    r'\b(name|first[_\s-]?name|last[_\s-]?name|surname|forename|full[_\s-]?name)\b',
     re.IGNORECASE,
 )
-EMAIL_HEADERS = re.compile(r'\be[_\s-]?mail\b', re.IGNORECASE)
+_MEMBER_EXACT = re.compile(r'^member$', re.IGNORECASE)
+EMAIL_HEADERS = re.compile(r'\be[_\s-]?mail(\s*(address|addr\.?))?\s*$', re.IGNORECASE)
 
 # Fullmatch variants for header-row detection — prevents matching header words
 # that appear as substrings in note cells like 'NB: order A_Z by First Name'.
@@ -282,7 +283,7 @@ def detect_columns(fieldnames: list[str], rows: list[dict]) -> dict[str, list]:
     for col in fieldnames:
         if EMAIL_HEADERS.search(col):
             email_cols.append(col)
-        elif NAME_HEADERS.search(col):
+        elif '/' not in col and (NAME_HEADERS.search(col) or _MEMBER_EXACT.fullmatch(col.strip())):
             name_cols.append(col)
 
     # Content sniff over at most 5 rows — short columns are common.
@@ -550,3 +551,40 @@ def find_duplicate_candidates(
                 candidates.append((a, b, best))
 
     return sorted(candidates, key=lambda x: x[2], reverse=True)
+
+
+def search_dancer(
+    conn: sqlite3.Connection,
+    fernet: Fernet,
+    query: str,
+    threshold: float = 0.6,
+    max_results: int = 10,
+) -> list[tuple[dict, float]]:
+    """Fuzzy-search the database for dancers matching a name or email query.
+
+    Compares query against full name, email, and email local part. Returns
+    list of (dancer, score) sorted by score descending, capped at max_results.
+    """
+    q = query.strip().lower()
+    q_local = re.sub(r'[._\-]', ' ', q.split('@')[0]) if '@' in q else q
+
+    results = []
+    for dancer in decrypt_all(conn, fernet):
+        n = dancer.get('name') or {}
+        full_name = f'{n.get("first_name", "")} {n.get("last_name", "")}'.strip().lower()
+        email = (dancer.get('email') or {}).get('email', '').lower()
+        email_local = re.sub(r'[._\-]', ' ', email.split('@')[0]) if email else ''
+
+        best = 0.0
+        if full_name:
+            best = max(best, SequenceMatcher(None, q, full_name).ratio())
+        if email:
+            best = max(best, SequenceMatcher(None, q, email).ratio())
+        if email_local:
+            best = max(best, SequenceMatcher(None, q_local, email_local).ratio())
+
+        if best >= threshold:
+            results.append((dancer, best))
+
+    results.sort(key=lambda x: x[1], reverse=True)
+    return results[:max_results]
