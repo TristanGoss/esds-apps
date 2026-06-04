@@ -96,7 +96,7 @@ And run the linter with auto-fixes like so:
 poetry run ruff check --fix .
 ```
 
-A settings file is included in the repo to help you integrate with CV Code, but you'll need to install the Ruff extension to use it.
+A settings file is included in the repo to help you integrate with VS Code, but you'll need to install the Ruff extension to use it.
 
 ### Running the dev server
 ```bash

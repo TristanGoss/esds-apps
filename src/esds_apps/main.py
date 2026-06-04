@@ -169,7 +169,7 @@ async def remove_volunteer(request: Request, volunteer_uuid: str, _: None = Depe
 
 @app.get('/membership-cards/scanner', response_class=HTMLResponse)
 async def scanner(request: Request):
-    return config.TEMPLATES.TemplateResponse('rapid_scanner.html', {'request': request})
+    return config.TEMPLATES.TemplateResponse(request, 'rapid_scanner.html')
 
 
 @app.get('/proxy-card-check')
