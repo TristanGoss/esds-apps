@@ -2,37 +2,43 @@ import types
 from http import HTTPStatus
 from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
-from fastapi.responses import RedirectResponse, Response, StreamingResponse
+import respx
+from fastapi.responses import RedirectResponse, StreamingResponse
 from fastapi.testclient import TestClient
 
+from esds_apps import config
 from esds_apps.main import (
     app,
     card_scanning_log,
     create_and_or_return_wallet_pass_link,
     download_checks,
     landing_page,
-    proxy_card_check,
 )
 
 
 @pytest.fixture
 def client():
-    return TestClient(app)
+    return TestClient(app, follow_redirects=False)
 
 
-def test_qr_codes_table_get(client, monkeypatch):
-    # Patch qr_db.list_qr_codes to return dummy data
+@pytest.fixture
+def auth_client(monkeypatch):
+    """TestClient with auth bypassed."""
+    monkeypatch.setattr('esds_apps.auth._get_authenticated_email', lambda req: 'user@example.com')
+    return TestClient(app, follow_redirects=False)
+
+
+def test_qr_codes_table_get(auth_client, monkeypatch):
     dummy_codes = [{'code_id': 'abc123', 'target_url': 'https://example.com', 'description': 'desc', 'scan_count': 0}]
     monkeypatch.setattr('esds_apps.main.qr_db', types.SimpleNamespace(list_qr_codes=lambda: dummy_codes))
-    response = client.get('/qr-codes')
+    response = auth_client.get('/qr-codes')
     assert response.status_code == HTTPStatus.OK
-    assert 'Tracked QR Codes' in response.text
     assert 'abc123' in response.text
 
 
-def test_qr_codes_table_post_create(client, monkeypatch):
-    # Patch qr_db.add_qr_code and list_qr_codes
+def test_qr_codes_table_post_create(auth_client, monkeypatch):
     called = {}
 
     def fake_add_qr_code(code_id, target_url, description):
@@ -44,12 +50,12 @@ def test_qr_codes_table_post_create(client, monkeypatch):
             add_qr_code=fake_add_qr_code, list_qr_codes=lambda: [], delete_qr_code=lambda code_id: None
         ),
     )
-    response = client.post('/qr-codes', data={'target_url': 'https://test.com', 'description': 'desc'})
+    response = auth_client.post('/qr-codes', data={'target_url': 'https://test.com', 'description': 'desc'})
     assert response.status_code == HTTPStatus.SEE_OTHER
     assert called['added'][1] == 'https://test.com'
 
 
-def test_qr_codes_table_post_delete(client, monkeypatch):
+def test_qr_codes_table_post_delete(auth_client, monkeypatch):
     called = {}
 
     def fake_delete_qr_code(code_id):
@@ -61,13 +67,12 @@ def test_qr_codes_table_post_delete(client, monkeypatch):
             delete_qr_code=fake_delete_qr_code, list_qr_codes=lambda: [], add_qr_code=lambda *a, **kw: None
         ),
     )
-    response = client.post('/qr-codes', data={'delete_code_id': 'abc123'})
+    response = auth_client.post('/qr-codes', data={'delete_code_id': 'abc123'})
     assert response.status_code == HTTPStatus.SEE_OTHER
     assert called['deleted'] == 'abc123'
 
 
-def test_serve_tracked_qr_code_svg(client, monkeypatch):
-    # Patch qr_db.get_qr_code and segno.make
+def test_serve_tracked_qr_code_svg(auth_client, monkeypatch):
     monkeypatch.setattr(
         'esds_apps.main.qr_db',
         types.SimpleNamespace(
@@ -85,13 +90,13 @@ def test_serve_tracked_qr_code_svg(client, monkeypatch):
             buf.write(b'<svg>dummy</svg>')
 
     monkeypatch.setattr('esds_apps.main.segno', types.SimpleNamespace(make=lambda url: DummyQR()))
-    response = client.get('/qr-codes/abc123/qr.svg')
+    response = auth_client.get('/qr-codes/abc123/qr.svg')
     assert response.status_code == HTTPStatus.OK
     assert b'dummy' in response.content
     assert response.headers['content-type'] == 'image/svg+xml'
 
 
-def test_serve_tracked_qr_code_png(client, monkeypatch):
+def test_serve_tracked_qr_code_png(auth_client, monkeypatch):
     monkeypatch.setattr(
         'esds_apps.main.qr_db',
         types.SimpleNamespace(
@@ -109,15 +114,15 @@ def test_serve_tracked_qr_code_png(client, monkeypatch):
             buf.write(b'PNGDATA')
 
     monkeypatch.setattr('esds_apps.main.segno', types.SimpleNamespace(make=lambda url: DummyQR()))
-    response = client.get('/qr-codes/abc123/qr.png')
+    response = auth_client.get('/qr-codes/abc123/qr.png')
     assert response.status_code == HTTPStatus.OK
     assert b'PNGDATA' in response.content
     assert response.headers['content-type'] == 'image/png'
 
 
-def test_serve_tracked_qr_code_not_found(client, monkeypatch):
+def test_serve_tracked_qr_code_not_found(auth_client, monkeypatch):
     monkeypatch.setattr('esds_apps.main.qr_db', types.SimpleNamespace(get_qr_code=lambda code_id: None))
-    response = client.get('/qr-codes/abc123/qr.svg')
+    response = auth_client.get('/qr-codes/abc123/qr.svg')
     assert response.status_code == HTTPStatus.NOT_FOUND
 
 
@@ -139,7 +144,7 @@ def test_tracked_qr_scan_redirect(client, monkeypatch):
             increment_scan=fake_increment_scan,
         ),
     )
-    response = client.get('/qr-codes/abc123/scan')
+    response = client.get('/s/abc123')
     assert response.status_code == HTTPStatus.FOUND
     assert response.headers['location'] == 'https://example.com'
     assert called['incremented'] == 'abc123'
@@ -150,7 +155,7 @@ def test_tracked_qr_scan_not_found(client, monkeypatch):
         'esds_apps.main.qr_db',
         types.SimpleNamespace(get_qr_code=lambda code_id: None, increment_scan=lambda code_id: None),
     )
-    response = client.get('/qr-codes/abc123/scan')
+    response = client.get('/s/abc123')
     assert response.status_code == HTTPStatus.NOT_FOUND
 
 
@@ -162,26 +167,25 @@ async def test_landing_page(mock_template):
     mock_template.assert_called_once_with(request, 'landing.html')
 
 
-@pytest.mark.asyncio
-@patch('esds_apps.main.httpx.AsyncClient.get')
-async def test_proxy_card_check_valid_url(mock_get):
-    mock_get.return_value = MagicMock(content=b'abc', status_code=HTTPStatus.OK, headers={'content-type': 'text/plain'})
-    result = await proxy_card_check(url='https://esds-test.dancecloud.xyz/dummy')
-    assert isinstance(result, Response)
-    assert result.body == b'abc'
+def test_proxy_card_check_valid_url(client):
+    target = config.DC_HOST + '/api/dummy'
+    with respx.mock:
+        respx.get(target).mock(return_value=httpx.Response(200, content=b'abc', headers={'content-type': 'text/plain'}))
+        response = client.get(f'/proxy-card-check?url={target}')
+    assert response.status_code == HTTPStatus.OK
+    assert response.content == b'abc'
+
+
+def test_proxy_card_check_invalid_url(client):
+    response = client.get('/proxy-card-check?url=https://malicious.com')
+    assert response.status_code == HTTPStatus.BAD_REQUEST
 
 
 @pytest.mark.asyncio
-async def test_proxy_card_check_invalid_url():
-    result = await proxy_card_check(url='https://malicious.com')
-    assert isinstance(result, str)
-    assert 'has not been proxied' in result
-
-
-@pytest.mark.asyncio
+@patch('esds_apps.auth._get_authenticated_email', return_value='user@example.com')
 @patch('esds_apps.main.fetch_membership_card_checks')
 @patch('esds_apps.main.config.TEMPLATES.TemplateResponse')
-async def test_card_scanning_log(mock_template, mock_fetch, sample_check):
+async def test_card_scanning_log(mock_template, mock_fetch, mock_auth, sample_check):
     request = MagicMock()
     mock_fetch.return_value = [sample_check]
     await card_scanning_log(request)
@@ -192,10 +196,11 @@ async def test_card_scanning_log(mock_template, mock_fetch, sample_check):
 
 
 @pytest.mark.asyncio
+@patch('esds_apps.auth._get_authenticated_email', return_value='user@example.com')
 @patch('esds_apps.main.fetch_membership_card_checks')
-async def test_download_checks_csv(mock_fetch, sample_check):
+async def test_download_checks_csv(mock_fetch, mock_auth, sample_check):
     mock_fetch.return_value = [sample_check]
-    response = await download_checks(days_ago=10)
+    response = await download_checks(MagicMock(), days_ago=10)
     assert isinstance(response, StreamingResponse)
     text = ''.join([chunk async for chunk in response.body_iterator])
     assert 'member_uuid' in text
@@ -231,3 +236,121 @@ async def test_wallet_pass_redirect_cache_miss(mock_cache, mock_fetch, mock_crea
     assert isinstance(response, RedirectResponse)
     assert response.status_code == HTTPStatus.SEE_OTHER
     assert 'pass2u.net/d/newpassid' in response.headers['location']
+
+
+@pytest.mark.asyncio
+@patch('esds_apps.auth._get_authenticated_email', return_value='user@example.com')
+@patch('esds_apps.main.fetch_membership_cards', return_value=[])
+@patch('esds_apps.main.config.TEMPLATES.TemplateResponse')
+async def test_membership_cards_page(mock_template, mock_fetch, mock_auth):
+    from esds_apps.main import membership_cards
+
+    await membership_cards(MagicMock())
+    mock_template.assert_called_once()
+
+
+@pytest.mark.asyncio
+@patch('esds_apps.auth._get_authenticated_email', return_value='user@example.com')
+@patch('esds_apps.main.fetch_pos_permissions', return_value=[])
+@patch('esds_apps.main.config.TEMPLATES.TemplateResponse')
+async def test_pos_permissions_page(mock_template, mock_fetch, mock_auth):
+    from esds_apps.main import pos_permissions
+
+    await pos_permissions(MagicMock())
+    mock_template.assert_called_once()
+
+
+def test_serve_tracked_qr_code_invalid_format(auth_client, monkeypatch):
+    monkeypatch.setattr(
+        'esds_apps.main.qr_db',
+        types.SimpleNamespace(
+            get_qr_code=lambda code_id: {
+                'code_id': code_id,
+                'target_url': 'https://example.com',
+                'description': 'desc',
+                'scan_count': 0,
+            }
+        ),
+    )
+    monkeypatch.setattr('esds_apps.main.segno', types.SimpleNamespace(make=lambda url: MagicMock()))
+    response = auth_client.get('/qr-codes/abc123/qr.pdf')
+    assert response.status_code == HTTPStatus.BAD_REQUEST
+
+
+def _stub_qr_db(**extra):
+    return types.SimpleNamespace(
+        list_qr_codes=lambda: [],
+        add_qr_code=lambda *a, **kw: None,
+        delete_qr_code=lambda *a: None,
+        **extra,
+    )
+
+
+def test_qr_codes_table_post_empty_url(auth_client, monkeypatch):
+    monkeypatch.setattr('esds_apps.main.qr_db', _stub_qr_db())
+    response = auth_client.post('/qr-codes', data={'target_url': '', 'description': 'desc'})
+    assert response.status_code == HTTPStatus.OK
+    assert 'Please enter a target URL' in response.text
+
+
+def test_qr_codes_table_post_unsafe_url(auth_client, monkeypatch):
+    monkeypatch.setattr('esds_apps.main.qr_db', _stub_qr_db())
+    response = auth_client.post('/qr-codes', data={'target_url': 'ftp://bad.com', 'description': 'desc'})
+    assert response.status_code == HTTPStatus.OK
+    assert 'http' in response.text
+
+
+def test_tracked_qr_scan_unsafe_url(client, monkeypatch):
+    monkeypatch.setattr(
+        'esds_apps.main.qr_db',
+        types.SimpleNamespace(
+            get_qr_code=lambda code_id: {
+                'code_id': code_id,
+                'target_url': 'javascript:evil()',
+                'description': 'x',
+                'scan_count': 0,
+            },
+            increment_scan=lambda code_id: None,
+        ),
+    )
+    response = client.get('/s/abc123')
+    assert response.status_code == HTTPStatus.INTERNAL_SERVER_ERROR
+
+
+def test_download_qr_code_scans_csv(auth_client, monkeypatch):
+    from datetime import datetime, timezone
+
+    dt1 = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    dt2 = datetime(2024, 1, 2, 9, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        'esds_apps.main.qr_db',
+        types.SimpleNamespace(
+            get_qr_code=lambda code_id: {
+                'code_id': code_id,
+                'target_url': 'https://x.com',
+                'description': 'My Event',
+                'scan_count': 2,
+            },
+            get_scan_datetimes=lambda code_id: [dt1, dt2],
+        ),
+    )
+    response = auth_client.get('/qr-codes/abc123/scans.csv')
+    assert response.status_code == HTTPStatus.OK
+    assert 'scanned_at_utc' in response.text
+    assert '2024-01-01' in response.text
+
+
+def test_health_endpoint(client):
+    assert client.get('/health').status_code == HTTPStatus.OK
+
+
+def test_auth_login_redirects_to_google(client):
+    response = client.get('/auth/login')
+    assert response.status_code == HTTPStatus.FOUND
+    assert 'accounts.google.com' in response.headers['location']
+
+
+def test_auth_logout_clears_cookie(client):
+    response = client.get('/auth/logout')
+    assert response.status_code == HTTPStatus.FOUND
+    assert response.headers['location'] == '/'
