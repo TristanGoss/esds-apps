@@ -539,6 +539,13 @@ def find_duplicate_candidates(
             if ae and be:
                 best = max(best, SequenceMatcher(None, ae, be).ratio())
 
+            ae_local = re.sub(r'[._\-]', ' ', ae.split('@')[0]) if ae else ''
+            be_local = re.sub(r'[._\-]', ' ', be.split('@')[0]) if be else ''
+            if a_full and be_local:
+                best = max(best, SequenceMatcher(None, a_full, be_local).ratio())
+            if b_full and ae_local:
+                best = max(best, SequenceMatcher(None, b_full, ae_local).ratio())
+
             if best >= threshold:
                 candidates.append((a, b, best))
 

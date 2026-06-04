@@ -804,3 +804,12 @@ def test_find_duplicate_candidates_no_false_positives(opened_db):
     pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Bob', 'last_name': 'Jones'}, None)
     candidates = pseudonymise.find_duplicate_candidates(conn, fernet, threshold=0.9)
     assert len(candidates) == 0
+
+
+def test_find_duplicate_candidates_name_vs_email_local(opened_db):
+    conn, fernet, mac_key = opened_db
+    # One record has only a name; the other has only an email whose local part encodes the same name.
+    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, {'first_name': 'Chris', 'last_name': 'Leeson'}, None)
+    pseudonymise.get_or_create_dancer_id(conn, fernet, mac_key, None, {'email': 'chris.leeson@example.com'})
+    candidates = pseudonymise.find_duplicate_candidates(conn, fernet, threshold=0.8)
+    assert len(candidates) == 1
