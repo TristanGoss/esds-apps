@@ -338,6 +338,19 @@ def _write_sheet(
         ws_out.append([row[c] for c in original_fieldnames])
 
 
+def _copy_sheet_verbatim(ws, ws_out) -> None:
+    """Copy every cell value (including formulas) at its original coordinate.
+
+    Used for sheets with no detected PII — e.g. aggregate tally grids. The
+    header-keyed reconstruction in _read_sheet/_write_sheet collapses any sheet
+    that isn't a flat name-per-row table (duplicate or empty header cells map
+    multiple columns onto one dict key), so such sheets must be passed through
+    untouched rather than rebuilt.
+    """
+    for row in ws.iter_rows():
+        ws_out.append([cell.value for cell in row])
+
+
 # ---------------------------------------------------------------------------
 # Column detection
 # ---------------------------------------------------------------------------
@@ -382,6 +395,14 @@ def _pseudonymise_sheet(
     _email_cols = email_cols if email_cols is not None else detected['email_cols']
     print(f'  Name columns:  {_name_cols}')
     print(f'  Email columns: {_email_cols}')
+
+    if not _name_cols and not _email_cols:
+        # Nothing to redact (e.g. an aggregate tally sheet). Copy verbatim rather
+        # than rebuilding via header-keyed reconstruction, which would destroy any
+        # non-tabular layout. No PII is present, so this is safe.
+        print('  No name/email columns detected — copying sheet through unchanged.')
+        _copy_sheet_verbatim(ws, ws_out)
+        return [], 0
 
     pii_cols = sorted(_name_cols + _email_cols, key=lambda c: fieldnames.index(c))
     col_rename = {col: ('dancer_id' if i == 0 else 'redacted') for i, col in enumerate(pii_cols)}

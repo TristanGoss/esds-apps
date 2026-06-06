@@ -762,6 +762,55 @@ def test_pseudonymise_multi_sheet(tmp_path):
     assert result['Feb'][0]['First Name'].startswith('DNC-')
 
 
+def test_pseudonymise_copies_non_pii_sheet_verbatim(tmp_path):
+    p = tmp_path / 'tally.xlsx'
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Tally'
+    ws.append(['Week 1', 'Members', 'Tot:', 19])
+    ws.append([None, True, True, False])
+    ws.append([None, False, True, True])
+    wb.save(p)
+
+    """A sheet with no name/email columns (e.g. an aggregate tally grid) must be
+    copied through cell-for-cell, not rebuilt — rebuilding collapsed such sheets.
+    """
+
+    out = tmp_path / 'out.xlsx'
+    result = pseudonymise.pseudonymise(p, tmp_path / 'db.sqlite', PASSPHRASE, output_path=out)
+    assert result['Tally'] == []  # nothing redacted
+
+    data = list(openpyxl.load_workbook(out)['Tally'].iter_rows(values_only=True))
+    assert data[0] == ('Week 1', 'Members', 'Tot:', 19)
+    assert data[1] == (None, True, True, False)
+    assert data[2] == (None, False, True, True)
+
+
+def test_pseudonymise_mixed_pii_and_tally_sheets(tmp_path):
+    p = tmp_path / 'mixed.xlsx'
+    wb = openpyxl.Workbook()
+    roster = wb.active
+    roster.title = 'Roster'
+    roster.append(['First Name', 'Last Name'])
+    roster.append(['Alice', 'Smith'])
+    tally = wb.create_sheet('Tally')
+    tally.append(['Members', 'Tot:', 7])
+    tally.append([True, True, False])
+    wb.save(p)
+
+    """A roster sheet is pseudonymised while a tally sheet in the same workbook
+    survives intact.
+    """
+
+    out = tmp_path / 'out.xlsx'
+    result = pseudonymise.pseudonymise(p, tmp_path / 'db.sqlite', PASSPHRASE, output_path=out)
+    assert result['Roster'][0]['First Name'].startswith('DNC-')
+    assert result['Tally'] == []
+
+    wb_out = openpyxl.load_workbook(out)
+    assert list(wb_out['Tally'].iter_rows(values_only=True)) == [('Members', 'Tot:', 7), (True, True, False)]
+
+
 # ============================================================================
 # Folder processing
 # ============================================================================
