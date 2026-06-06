@@ -31,6 +31,10 @@ class TicketType(StrEnum):
     MEMBER = 'member'
     CONCESSION = 'concession'
     NON_MEMBER = 'non_member'
+    # Many registers only record non-member vs not: a single 'Concession / Member?' flag says
+    # someone is entitled to the member/concession rate (i.e. not a non-member) without saying
+    # which. Use this when member and concession genuinely can't be told apart.
+    MEMBER_OR_CONCESSION = 'member_or_concession'
 
 
 # Tables, the unifying view, and the one index that isn't already implied by a

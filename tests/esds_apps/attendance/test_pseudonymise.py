@@ -673,6 +673,45 @@ def test_pseudonymise_replaces_pii(simple_xlsx, tmp_path):
     assert rows[0]['Notes'] == 'Regular'
 
 
+def test_pseudonymise_side_by_side_record_blocks(tmp_path):
+    """A register printed as two halves side by side: each half is a different person per row.
+
+    Regression: duplicate headers first collapsed onto one dict key (clobbering the
+    dancer_id), and even once separated only the first half got an id. Each repeated block
+    must get its own dancer_id, since the two halves are two halves of one attendee list.
+    """
+    p = tmp_path / 'teadance.xlsx'
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Sheet1'
+    ws.append(['#', 'First Name', 'Surname', 'Concession', 'Present?', '#', 'First Name', 'Surname', 'Concession'])
+    ws.append([39, 'Alice', 'Smith', 'Yes', 'x', 60, 'Carol', 'Reid', 'No'])
+    ws.append([40, 'Bob', 'Jones', 'No', 'x', 61, 'Dave', 'Watt', 'Yes'])
+    wb.save(p)
+
+    out = tmp_path / 'out.xlsx'
+    pseudonymise.pseudonymise(p, tmp_path / 'db.sqlite', PASSPHRASE, output_path=out)
+    data = list(openpyxl.load_workbook(out).active.iter_rows(values_only=True))
+
+    # Both halves' first-name columns become 'dancer_id'; surnames 'redacted'; non-PII kept.
+    assert data[0] == (
+        '#',
+        'dancer_id',
+        'redacted',
+        'Concession',
+        'Present?',
+        '#',
+        'dancer_id',
+        'redacted',
+        'Concession',
+    )
+    left, right = data[1][1], data[1][6]
+    assert left.startswith('DNC-') and right.startswith('DNC-')
+    assert left != right  # different people in each half → different ids
+    assert data[1][0] == '39' and data[1][5] == '60'  # both halves' data survive (cells stringified)
+    assert data[1][4] == 'x'  # Present? marker preserved
+
+
 def test_pseudonymise_writes_output_file(simple_xlsx, tmp_path):
     out = tmp_path / 'out.xlsx'
     pseudonymise.pseudonymise(simple_xlsx, tmp_path / 'db.sqlite', PASSPHRASE, output_path=out)

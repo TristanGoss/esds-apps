@@ -299,11 +299,47 @@ def decrypt_dancer(ctx: DbContext, dancer_id: str) -> dict | None:
 # ---------------------------------------------------------------------------
 
 
+# Some sheets repeat the whole column block side by side (e.g. the Tea Dance registers
+# print two identical halves). Header-keyed row dicts would collapse those duplicate
+# columns onto one key — losing data and clobbering the dancer_id rename — so duplicate
+# headers are made unique for internal keying with this separator, then stripped back to
+# their original text on output. The unit-separator char never occurs in real headers.
+_DUP_SUFFIX = '\x1f'
+
+
+def _uniquify(fieldnames: list[str]) -> list[str]:
+    """Make duplicate header names unique so each column keeps its own dict key."""
+    seen: dict[str, int] = {}
+    out = []
+    for name in fieldnames:
+        seen[name] = seen.get(name, 0) + 1
+        out.append(name if seen[name] == 1 else f'{name}{_DUP_SUFFIX}{seen[name]}')
+    return out
+
+
+def _original_header(name: str) -> str:
+    """Strip the disambiguation suffix added by _uniquify, recovering the original header."""
+    return name.split(_DUP_SUFFIX, 1)[0]
+
+
+def _dup_index(name: str) -> int:
+    """Header-occurrence index of a uniquified name (1 for the first/only occurrence).
+
+    Repeated header blocks are how a register printed as several halves side by side
+    encodes several independent person-records per row; the occurrence index groups each
+    block's columns together.
+    """
+    name, _, occurrence = name.partition(_DUP_SUFFIX)
+    return int(occurrence) if occurrence else 1
+
+
 def _read_sheet(ws) -> tuple[list[str], list[dict], list[list]]:
     """Read an openpyxl worksheet. Returns (fieldnames, rows, prefix_rows).
 
     Scans for the first row where any cell exactly matches a known name/email
     header. Rows above that are returned as prefix_rows and written back verbatim.
+    Duplicate headers are disambiguated (see _uniquify) so repeated column blocks
+    don't collapse onto one dict key.
     """
     all_rows = [[str(c) if c is not None else '' for c in row] for row in ws.iter_rows(values_only=True)]
 
@@ -313,7 +349,7 @@ def _read_sheet(ws) -> tuple[list[str], list[dict], list[list]]:
             header_idx = i
             break
 
-    fieldnames = all_rows[header_idx] if all_rows else []
+    fieldnames = _uniquify(all_rows[header_idx]) if all_rows else []
     rows = []
     for raw in all_rows[header_idx + 1 :] if all_rows else []:
         if not any(cell.strip() for cell in raw):
@@ -380,6 +416,30 @@ def detect_columns(fieldnames: list[str], rows: list[dict]) -> dict[str, list]:
 # ---------------------------------------------------------------------------
 
 
+@dataclass
+class _RecordBlock:
+    """One person-record's PII columns within a row (one half of a side-by-side register)."""
+
+    id_col: str  # PII column that becomes 'dancer_id'
+    redact_cols: list[str]  # remaining PII columns, redacted
+    name_cols: list[str]  # name columns in this block
+    email_cols: list[str]  # email columns in this block
+
+
+def _record_fields(row: dict, name_cols: list[str], email_cols: list[str]) -> tuple[dict | None, dict | None]:
+    """Extract (name_fields, email_fields) for one person-record from a row, or (None, None)."""
+    raw_name = {}
+    for c in name_cols:
+        val = row.get(c, '').strip()
+        if val and _VALID_NAME_RE.match(val):
+            raw_name[_canonical_name_key(c)] = val
+    name_fields = {k: raw_name[k] for k in _CANONICAL_NAME_ORDER if k in raw_name} or None
+
+    email_val = next((row[c].strip() for c in email_cols if EMAIL_RE.match(row.get(c, '').strip())), None)
+    email_fields = {'email': email_val} if email_val else None
+    return name_fields, email_fields
+
+
 def _pseudonymise_sheet(
     ws,
     ws_out,
@@ -404,30 +464,38 @@ def _pseudonymise_sheet(
         _copy_sheet_verbatim(ws, ws_out)
         return [], 0
 
+    # A register printed as several halves side by side repeats the column block, so each
+    # repeat is an independent person-record per row and gets its own dancer_id. Group the
+    # PII columns by header-occurrence index into one block per record; within each block the
+    # first PII column becomes 'dancer_id' and the rest 'redacted'. A normal single table is
+    # just one block, so this preserves the ordinary case.
     pii_cols = sorted(_name_cols + _email_cols, key=lambda c: fieldnames.index(c))
-    col_rename = {col: ('dancer_id' if i == 0 else 'redacted') for i, col in enumerate(pii_cols)}
-    out_fieldnames = [col_rename.get(c, c) for c in fieldnames]
+    name_set, email_set = set(_name_cols), set(_email_cols)
+    blocks = [
+        _RecordBlock(
+            id_col=cols[0],
+            redact_cols=cols[1:],
+            name_cols=[c for c in cols if c in name_set],
+            email_cols=[c for c in cols if c in email_set],
+        )
+        for cols in ([c for c in pii_cols if _dup_index(c) == idx] for idx in sorted({_dup_index(c) for c in pii_cols}))
+    ]
+
+    col_rename = {}
+    for block in blocks:
+        col_rename[block.id_col] = 'dancer_id'
+        col_rename.update({c: 'redacted' for c in block.redact_cols})
+    out_fieldnames = [col_rename.get(c, _original_header(c)) for c in fieldnames]
 
     before = ctx.conn.execute('SELECT COUNT(*) FROM pseudonyms').fetchone()[0]
     for row in rows:
-        raw_name = {}
-        for c in _name_cols:
-            val = row.get(c, '').strip()
-            if val and _VALID_NAME_RE.match(val):
-                raw_name[_canonical_name_key(c)] = val
-        name_fields = {k: raw_name[k] for k in _CANONICAL_NAME_ORDER if k in raw_name} or None
-
-        email_val = next((row[c].strip() for c in _email_cols if EMAIL_RE.match(row.get(c, '').strip())), None)
-        email_fields = {'email': email_val} if email_val else None
-
-        if not name_fields and not email_fields:
-            continue
-
-        dancer_id = get_or_create_dancer_id(ctx, name_fields, email_fields)
-
-        row[pii_cols[0]] = dancer_id
-        for col in pii_cols[1:]:
-            row[col] = 'redacted'
+        for block in blocks:
+            name_fields, email_fields = _record_fields(row, block.name_cols, block.email_cols)
+            if not name_fields and not email_fields:
+                continue  # no person in this half of this row — leave its cells as they are
+            row[block.id_col] = get_or_create_dancer_id(ctx, name_fields, email_fields)
+            for col in block.redact_cols:
+                row[col] = 'redacted'
 
     new_count = ctx.conn.execute('SELECT COUNT(*) FROM pseudonyms').fetchone()[0] - before
     _write_sheet(ws_out, out_fieldnames, rows, fieldnames, prefix_rows)
