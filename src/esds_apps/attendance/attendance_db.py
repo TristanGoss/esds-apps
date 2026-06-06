@@ -1,0 +1,273 @@
+"""Attendance database — core schema and write API.
+
+A standalone SQLite file holding only ``dancer_id`` pseudonyms and headcounts —
+never names or emails — so it can safely go online while ``pseudonyms.sqlite``
+stays offline. This module owns the schema and a narrow write API; it never reads
+a spreadsheet cell. Parsers (see ``ingest.py``) do that and call in here.
+
+See ``working/attendance_db_design.md`` for the design rationale.
+"""
+
+import sqlite3
+from dataclasses import dataclass
+from datetime import date, datetime, timezone
+from enum import StrEnum
+from pathlib import Path
+
+
+class EventType(StrEnum):
+    COURSE = 'course'
+    SOCIAL = 'social'
+    WEEKENDER = 'weekender'
+    WORKSHOP = 'workshop'
+
+
+class ActivityType(StrEnum):
+    LESSON = 'lesson'
+    SOCIAL = 'social'
+
+
+class TicketType(StrEnum):
+    MEMBER = 'member'
+    CONCESSION = 'concession'
+    NON_MEMBER = 'non_member'
+
+
+# Tables, the unifying view, and the one index that isn't already implied by a
+# PRIMARY KEY or UNIQUE constraint. Everything is IF NOT EXISTS so open_db is idempotent.
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS event (
+    event_id   INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    venue      TEXT,
+    UNIQUE(name)
+);
+
+CREATE TABLE IF NOT EXISTS dancer (
+    dancer_id TEXT PRIMARY KEY
+);
+
+CREATE TABLE IF NOT EXISTS event_teacher (
+    event_id  INTEGER NOT NULL REFERENCES event(event_id),
+    dancer_id TEXT    NOT NULL REFERENCES dancer(dancer_id),
+    PRIMARY KEY (event_id, dancer_id)
+);
+
+CREATE TABLE IF NOT EXISTS activity (
+    activity_id   INTEGER PRIMARY KEY,
+    event_id      INTEGER NOT NULL REFERENCES event(event_id),
+    name          TEXT NOT NULL,
+    activity_type TEXT,
+    date          TEXT NOT NULL,
+    UNIQUE(event_id, name, date)
+);
+
+CREATE TABLE IF NOT EXISTS ingest_log (
+    ingest_id   INTEGER PRIMARY KEY,
+    source_file TEXT NOT NULL,
+    sheet       TEXT,
+    file_sha256 TEXT,
+    ingested_at TEXT,
+    note        TEXT
+);
+
+CREATE TABLE IF NOT EXISTS attendance (
+    attendance_id INTEGER PRIMARY KEY,
+    activity_id   INTEGER NOT NULL REFERENCES activity(activity_id),
+    dancer_id     TEXT NOT NULL REFERENCES dancer(dancer_id),
+    attended      INTEGER NOT NULL,
+    ticket_type   TEXT,
+    ingest_id     INTEGER REFERENCES ingest_log(ingest_id),
+    source_cell   TEXT,
+    UNIQUE(activity_id, dancer_id)
+);
+
+CREATE TABLE IF NOT EXISTS attendance_count (
+    count_id    INTEGER PRIMARY KEY,
+    activity_id INTEGER NOT NULL REFERENCES activity(activity_id),
+    ticket_type TEXT,
+    head_count  INTEGER NOT NULL,
+    ingest_id   INTEGER REFERENCES ingest_log(ingest_id),
+    source_cell TEXT,
+    UNIQUE(activity_id, ticket_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_activity_date ON activity(date);
+
+CREATE VIEW IF NOT EXISTS activity_attendance AS
+SELECT a.activity_id, a.event_id, a.date, a.activity_type,
+       COALESCE(named.n, 0)                       AS named_total,
+       COALESCE(agg.n, 0)                         AS aggregate_total,
+       COALESCE(named.n, 0) + COALESCE(agg.n, 0)  AS total
+FROM activity a
+LEFT JOIN (SELECT activity_id, COUNT(*) AS n FROM attendance
+           WHERE attended = 1 GROUP BY activity_id) named USING (activity_id)
+LEFT JOIN (SELECT activity_id, SUM(head_count) AS n FROM attendance_count
+           GROUP BY activity_id) agg USING (activity_id);
+"""
+
+
+def _to_iso_date(value: date | datetime | str) -> str:
+    """Normalise a date/datetime/ISO-ish string to a 'YYYY-MM-DD' string."""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    return datetime.fromisoformat(str(value).strip()).date().isoformat()
+
+
+@dataclass
+class AttendanceDb:
+    """Thin write API over the attendance SQLite file. All methods commit."""
+
+    conn: sqlite3.Connection
+
+    # ---- ingest provenance ----
+
+    def start_ingest(
+        self, source_file: str, sheet: str | None = None, file_sha256: str | None = None, note: str | None = None
+    ) -> int:
+        """Record a new ingest and return its id, to stamp on the rows it produces."""
+        cur = self.conn.execute(
+            'INSERT INTO ingest_log (source_file, sheet, file_sha256, ingested_at, note) VALUES (?, ?, ?, ?, ?)',
+            (source_file, sheet, file_sha256, datetime.now(timezone.utc).isoformat(), note),
+        )
+        self.conn.commit()
+        return cur.lastrowid
+
+    # ---- dancers ----
+
+    def ensure_dancer(self, dancer_id: str) -> None:
+        """Register a pseudonymous dancer id if not already present."""
+        self.conn.execute('INSERT OR IGNORE INTO dancer (dancer_id) VALUES (?)', (dancer_id,))
+
+    # ---- events ----
+
+    def upsert_event(self, name: str, event_type: EventType, venue: str | None = None) -> int:
+        """Insert or update an event by its unique name; return its id."""
+        row = self.conn.execute('SELECT event_id FROM event WHERE name = ?', (name,)).fetchone()
+        if row:
+            event_id = row[0]
+            self.conn.execute(
+                'UPDATE event SET event_type = ?, venue = COALESCE(?, venue) WHERE event_id = ?',
+                (str(event_type), venue, event_id),
+            )
+        else:
+            cur = self.conn.execute(
+                'INSERT INTO event (name, event_type, venue) VALUES (?, ?, ?)', (name, str(event_type), venue)
+            )
+            event_id = cur.lastrowid
+        self.conn.commit()
+        return event_id
+
+    def set_event_teachers(self, event_id: int, dancer_ids: list[str]) -> None:
+        """Replace the teacher set for an event (idempotent)."""
+        for dancer_id in dancer_ids:
+            self.ensure_dancer(dancer_id)
+        self.conn.execute('DELETE FROM event_teacher WHERE event_id = ?', (event_id,))
+        self.conn.executemany(
+            'INSERT OR IGNORE INTO event_teacher (event_id, dancer_id) VALUES (?, ?)',
+            [(event_id, d) for d in dancer_ids],
+        )
+        self.conn.commit()
+
+    # ---- activities ----
+
+    def upsert_activity(
+        self, event_id: int, name: str, date: date | datetime | str, activity_type: ActivityType | None = None
+    ) -> int:
+        """Insert or update an activity by (event, name, date); return its id."""
+        iso = _to_iso_date(date)
+        row = self.conn.execute(
+            'SELECT activity_id FROM activity WHERE event_id = ? AND name = ? AND date = ?', (event_id, name, iso)
+        ).fetchone()
+        if row:
+            activity_id = row[0]
+            if activity_type is not None:
+                self.conn.execute(
+                    'UPDATE activity SET activity_type = ? WHERE activity_id = ?', (str(activity_type), activity_id)
+                )
+        else:
+            cur = self.conn.execute(
+                'INSERT INTO activity (event_id, name, activity_type, date) VALUES (?, ?, ?, ?)',
+                (event_id, name, str(activity_type) if activity_type else None, iso),
+            )
+            activity_id = cur.lastrowid
+        self.conn.commit()
+        return activity_id
+
+    # ---- facts ----
+
+    def record_attendance(
+        self,
+        activity_id: int,
+        dancer_id: str,
+        attended: bool,
+        ticket_type: TicketType | None = None,
+        ingest_id: int | None = None,
+        source_cell: str | None = None,
+    ) -> None:
+        """Upsert one identified dancer's attendance at an activity (one row per pair)."""
+        self.ensure_dancer(dancer_id)
+        self.conn.execute(
+            'INSERT INTO attendance (activity_id, dancer_id, attended, ticket_type, ingest_id, source_cell) '
+            'VALUES (?, ?, ?, ?, ?, ?) '
+            'ON CONFLICT(activity_id, dancer_id) DO UPDATE SET '
+            '  attended = excluded.attended, '
+            '  ticket_type = COALESCE(excluded.ticket_type, ticket_type), '
+            '  ingest_id = excluded.ingest_id, '
+            '  source_cell = excluded.source_cell',
+            (activity_id, dancer_id, int(bool(attended)), _tt(ticket_type), ingest_id, source_cell),
+        )
+        self.conn.commit()
+
+    def record_count(
+        self,
+        activity_id: int,
+        ticket_type: TicketType | None,
+        head_count: int,
+        ingest_id: int | None = None,
+        source_cell: str | None = None,
+    ) -> None:
+        """Upsert an aggregate headcount (replace semantics, so re-ingest is idempotent).
+
+        Done by hand rather than ON CONFLICT because SQLite treats NULLs as distinct
+        in a UNIQUE index, so the anonymous (ticket_type = NULL) row would never conflict.
+        """
+        tt = _tt(ticket_type)
+        row = self.conn.execute(
+            'SELECT count_id FROM attendance_count WHERE activity_id = ? AND ticket_type IS ?', (activity_id, tt)
+        ).fetchone()
+        if row:
+            self.conn.execute(
+                'UPDATE attendance_count SET head_count = ?, ingest_id = ?, source_cell = ? WHERE count_id = ?',
+                (head_count, ingest_id, source_cell, row[0]),
+            )
+        else:
+            self.conn.execute(
+                'INSERT INTO attendance_count (activity_id, ticket_type, head_count, ingest_id, source_cell) '
+                'VALUES (?, ?, ?, ?, ?)',
+                (activity_id, tt, head_count, ingest_id, source_cell),
+            )
+        self.conn.commit()
+
+    def close(self) -> None:
+        """Close the underlying connection."""
+        self.conn.close()
+
+
+def _tt(ticket_type: TicketType | None) -> str | None:
+    # Preserve None as None (SQL NULL) instead of converting to string 'None'.
+    return str(ticket_type) if ticket_type is not None else None
+
+
+def open_db(db_path: Path | str) -> AttendanceDb:
+    """Open (or create) the attendance database. Idempotent; safe to call repeatedly."""
+    conn = sqlite3.connect(db_path)
+    conn.execute('PRAGMA foreign_keys = ON')
+    if str(db_path) != ':memory:':
+        conn.execute('PRAGMA journal_mode = WAL')
+    conn.executescript(_SCHEMA)
+    conn.commit()
+    return AttendanceDb(conn)
