@@ -332,6 +332,34 @@ def test_get_or_create_alt_first_name_not_overwritten(ctx):
     assert result['name']['alt_first_name'] == 'Xiaoling'  # not overwritten by 'Xiao'
 
 
+def test_get_or_create_stores_alt_email(ctx):
+    """Same name, different second email → alt_email stored on existing record."""
+    did = pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@work.com'}
+    )
+    pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@home.com'}
+    )
+    result = pseudonymise.decrypt_dancer(ctx, did)
+    assert result['email']['email'] == 'alice@work.com'
+    assert result['email'].get('alt_email') == 'alice@home.com'
+
+
+def test_get_or_create_alt_email_not_overwritten(ctx):
+    """alt_email is only written once; a third email doesn't overwrite it."""
+    did = pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@work.com'}
+    )
+    pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@home.com'}
+    )
+    pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@other.com'}
+    )
+    result = pseudonymise.decrypt_dancer(ctx, did)
+    assert result['email']['alt_email'] == 'alice@home.com'  # not overwritten by 'alice@other.com'
+
+
 def test_dancer_id_stable_across_fresh_dbs(tmp_path):
     """Same passphrase and input produces the same dancer ID in a freshly created DB."""
     name = {'first_name': 'Alice', 'last_name': 'Smith'}
@@ -797,6 +825,29 @@ def test_substitute_discards_conflict_first_name_by_default(ctx):
     assert 'alt_first_name' not in result['name']
 
 
+def test_substitute_stores_alt_email_when_explicitly_passed(ctx):
+    """conflict_email is stored as alt_email on new_id when provided."""
+    id1 = pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@work.com'}
+    )
+    id2 = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alicia', 'last_name': 'Smith'}, None)
+    pseudonymise.substitute_dancer_id(ctx, id2, id1, conflict_email='alice@personal.com')
+    result = pseudonymise.decrypt_dancer(ctx, id1)
+    assert result['email']['email'] == 'alice@work.com'
+    assert result['email']['alt_email'] == 'alice@personal.com'
+
+
+def test_substitute_discards_conflict_email_by_default(ctx):
+    """Without conflict_email, no alt_email is written to the surviving record."""
+    id1 = pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@work.com'}
+    )
+    id2 = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alicia', 'last_name': 'Smith'}, None)
+    pseudonymise.substitute_dancer_id(ctx, id2, id1)
+    result = pseudonymise.decrypt_dancer(ctx, id1)
+    assert 'alt_email' not in result['email']
+
+
 def test_substitute_raises_for_missing_id(ctx):
     id1 = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
     with pytest.raises(ValueError):
@@ -868,6 +919,23 @@ def test_find_duplicate_candidates_name_vs_email_local(ctx):
     assert len(candidates) == 1
 
 
+def test_find_duplicate_candidates_considers_alt_email(ctx):
+    """A match on alt_email should surface as a duplicate candidate."""
+    id1 = pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Dave', 'last_name': 'Brown'}, {'email': 'dave@work.com'}
+    )
+    # Manually store alt_email via a second encounter.
+    pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Dave', 'last_name': 'Brown'}, {'email': 'dave@home.com'})
+    # A second record whose primary email matches the alt_email of id1.
+    pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'David', 'last_name': 'Browne'}, {'email': 'dave@home.com'}
+    )
+    # id1 now has alt_email=dave@home.com; the third record has email=dave@home.com — should score high.
+    candidates = pseudonymise.find_duplicate_candidates(ctx, threshold=0.8)
+    ids_in_candidates = {c[0]['dancer_id'] for c in candidates} | {c[1]['dancer_id'] for c in candidates}
+    assert id1 in ids_in_candidates
+
+
 # ============================================================================
 # Dancer search
 # ============================================================================
@@ -916,3 +984,16 @@ def test_search_dancer_no_results(ctx):
     pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Bob', 'last_name': 'Jones'}, None)
     results = pseudonymise.search_dancer(ctx, 'zzz', threshold=0.9)
     assert results == []
+
+
+def test_search_dancer_finds_by_alt_email(ctx):
+    did = pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@work.com'}
+    )
+    # Trigger alt_email storage.
+    pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@home.com'}
+    )
+    results = pseudonymise.search_dancer(ctx, 'alice@home.com', threshold=0.9)
+    assert len(results) == 1
+    assert results[0][0]['dancer_id'] == did
