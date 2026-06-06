@@ -31,9 +31,14 @@ _TICKET_LABELS = {
     'non-members': TicketType.NON_MEMBER,
     'non members': TicketType.NON_MEMBER,
 }
-_GROUP_HEADERS = {'level 2 classes', 'social only'}
 _WEEK_RE = re.compile(r'Week\s*(\d+)\s*\(\s*(\d{1,2})\s+([A-Za-z]+)\)', re.IGNORECASE)
 _COUNTIF_RE = re.compile(r'COUNTIF\(\s*([A-Za-z]+)(\d+)\s*:\s*([A-Za-z]+)(\d+)', re.IGNORECASE)
+
+
+def _is_group_header(text: str) -> bool:
+    """True for a tally activity-group header. Tolerates 'Level 2 Class'/'Level 2 Classes'."""
+    t = text.strip().lower()
+    return t == 'social only' or t.startswith('level 2 class')
 
 
 # ---------------------------------------------------------------------------
@@ -42,8 +47,9 @@ _COUNTIF_RE = re.compile(r'COUNTIF\(\s*([A-Za-z]+)(\d+)\s*:\s*([A-Za-z]+)(\d+)',
 
 
 # Markers meaning "attended". Rosters vary by year: booleans (True), 'True'/'TRUE'
-# strings, ticks ('x', 'yes'), and check emoji (☑️/✅/✔/✓). Crosses (❎/❌) and
-# 'Refunded' fall through to False — a refunded ticket is a non-attendance.
+# strings, the Excel formula '=TRUE()' (read as text because we load formulas, not cached
+# values), ticks ('x', 'yes'), and check emoji (☑️/✅/✔/✓). Crosses (❎/❌), 'False',
+# '=FALSE()' and 'Refunded' fall through to False — a refunded ticket is a non-attendance.
 _TRUE_WORDS = {'true', 'yes', 'y', 'x', '1', '✓', '✔'}
 _TRUE_EMOJI = ('☑', '✅', '✔', '✓')  # ☑ ✅ ✔ ✓
 
@@ -52,7 +58,8 @@ def _is_true(value) -> bool:
     if value is True:
         return True
     if isinstance(value, str):
-        s = value.strip().lower()
+        # Normalise the '=TRUE()' / '=FALSE()' formula form down to 'true' / 'false'.
+        s = value.strip().lower().removeprefix('=').removesuffix('()')
         return s.startswith('true') or s in _TRUE_WORDS or any(e in value for e in _TRUE_EMOJI)
     return False
 
@@ -82,8 +89,61 @@ def _month_number(name: str) -> int | None:
     return None
 
 
-def _activity_type_for(label: str) -> ActivityType:
+def _activity_type_for(label: str, event_type: EventType) -> ActivityType:
+    """An activity's type. A social event holds only socials; otherwise the label decides.
+
+    Session-column headers ('Christmas Party', 'Tea Dance', 'Registered') rarely contain
+    the word 'social', so without the event-type override they'd wrongly read as lessons.
+    """
+    if event_type == EventType.SOCIAL:
+        return ActivityType.SOCIAL
     return ActivityType.SOCIAL if 'social' in label.lower() else ActivityType.LESSON
+
+
+def _event_type_for(title: str) -> EventType:
+    """Classify an event from keywords in its tab title.
+
+    'level' wins first: the termly "Level 2 & Social Only" tabs contain the word
+    "social" but are courses. Workshops next, then socials; anything unmatched
+    (Teachers Choice, plain Level N) is a course.
+    """
+    t = title.lower()
+    if 'level' in t:
+        return EventType.COURSE
+    if 'swingout' in t or 'swing out' in t:
+        return EventType.WEEKENDER
+    if 'workshop' in t or 'charleston' in t:
+        return EventType.WORKSHOP
+    if any(k in t for k in ('social', 'party', 'tea dance')):
+        return EventType.SOCIAL
+    return EventType.COURSE
+
+
+# Free-text difficulty parsed from a name. Ordered: first pattern to match wins. Lives on
+# the activity (not the event) because weekenders/workshops mix levels within one event.
+_DIFFICULTY_PATTERNS = [
+    (re.compile(r'level\s*1\b|\bl1\b', re.IGNORECASE), 'Level 1'),
+    (re.compile(r'level\s*2\b|\bl2\b', re.IGNORECASE), 'Level 2'),
+    (re.compile(r'level\s*3\b|\bl3\b', re.IGNORECASE), 'Level 3'),
+    (re.compile(r'\bbeg', re.IGNORECASE), 'beginners'),  # beginner(s), 'Begn'
+    (re.compile(r'\binterm', re.IGNORECASE), 'intermediate'),
+    (re.compile(r'\badv', re.IGNORECASE), 'advanced'),
+]
+
+
+def _difficulty_for(*texts: str | None) -> str | None:
+    """Difficulty string ('Level 1', 'beginners', ...) from the first text that matches.
+
+    Texts are tried most-specific first (activity label, then the sheet title), so a
+    workshop column headed 'Beginners' beats the tab's overall name. None if unknown.
+    """
+    for text in texts:
+        if not text:
+            continue
+        for pattern, label in _DIFFICULTY_PATTERNS:
+            if pattern.search(text):
+                return label
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -103,7 +163,8 @@ def _roster_header(matrix: list[tuple]) -> tuple[int, int] | None:
 def _session_columns(matrix: list[tuple], header_row: int) -> list[tuple]:
     """Columns whose cell in the row above the header is a date — i.e. session columns.
 
-    Returns a list of (col_index, activity_name, datetime, ActivityType).
+    Returns a list of (col_index, activity_name, datetime). Activity type is decided in
+    parse, where the event type is known.
     """
     if header_row == 0:
         return []
@@ -114,7 +175,7 @@ def _session_columns(matrix: list[tuple], header_row: int) -> list[tuple]:
         if dt is None:
             continue
         name = head[c] if c < len(head) and isinstance(head[c], str) and head[c].strip() else dt.date().isoformat()
-        out.append((c, str(name).strip(), dt, _activity_type_for(str(name))))
+        out.append((c, str(name).strip(), dt))
     return out
 
 
@@ -134,11 +195,13 @@ class RosterParser:
         sessions = _session_columns(matrix, header_row)
 
         title = ws.title
-        is_social = 'social' in title.lower() and 'level' not in title.lower()
-        event_id = db.upsert_event(f'{term}: {title}', EventType.SOCIAL if is_social else EventType.COURSE)
+        event_type = _event_type_for(title)
+        event_id = db.upsert_event(f'{term}: {_strip_attendance(title)}', event_type)
 
-        for col, name, dt, atype in sessions:
-            activity_id = db.upsert_activity(event_id, name, dt, atype)
+        for col, name, dt in sessions:
+            activity_type = _activity_type_for(name, event_type)
+            difficulty = 'social' if activity_type == ActivityType.SOCIAL else _difficulty_for(name, title)
+            activity_id = db.upsert_activity(event_id, name, dt, activity_type, difficulty)
             attended_by: dict[str, list[bool]] = defaultdict(list)
             for r in range(header_row + 1, len(matrix)):
                 row = matrix[r]
@@ -184,7 +247,7 @@ def _scan_tally(matrix: list[tuple]) -> _Tally:
             if not isinstance(value, str):
                 continue
             stripped = value.strip()
-            if stripped.lower() in _GROUP_HEADERS:
+            if _is_group_header(stripped):
                 t.groups.append((c, stripped))
             m = _WEEK_RE.search(stripped)
             if m:
@@ -224,7 +287,7 @@ class Level2TallyParser:
                     continue
                 if 'countif' in value.lower() and 'true' in value.lower():
                     has_countif = True
-                if value.strip().lower() in _GROUP_HEADERS:
+                if _is_group_header(value):
                     has_group = True
                 if _WEEK_RE.search(value):
                     has_week = True
@@ -234,7 +297,7 @@ class Level2TallyParser:
         """Ingest one tally tab: a headcount per (week, activity group, ticket type)."""
         matrix = list(ws.iter_rows(values_only=True))
         t = _scan_tally(matrix)
-        event_id = db.upsert_event(f'{term}: {ws.title}', EventType.COURSE)
+        event_id = db.upsert_event(f'{term}: {_strip_attendance(ws.title)}', _event_type_for(ws.title))
 
         for r, row in enumerate(matrix, start=1):
             for c, value in enumerate(row, start=1):
@@ -258,8 +321,10 @@ class Level2TallyParser:
         activity_date = datetime(year, month, day)
 
         head_count = _count_true(t, start_col, start_row, end_col, end_row)
+        activity_type = _activity_type_for(group, _event_type_for(title))
+        difficulty = 'social' if activity_type == ActivityType.SOCIAL else _difficulty_for(group)
         activity_id = db.upsert_activity(
-            event_id, f'{group} (Week {week_no})', activity_date, _activity_type_for(group)
+            event_id, f'{group} (Week {week_no})', activity_date, activity_type, difficulty
         )
         cell = f'{title}!{get_column_letter(col1)}{row1}'
         db.record_count(activity_id, ticket_type, head_count, ingest_id=ingest_id, source_cell=cell)
@@ -290,9 +355,16 @@ class IngestReport:
         return '\n'.join(lines)
 
 
+def _strip_attendance(s: str) -> str:
+    """Drop the word 'Attendance' (and its 31-char-truncated 'Attendanc') and tidy whitespace.
+
+    'Attendance' belongs on a spreadsheet tab but is noise in an event name.
+    """
+    return re.sub(r'\s+', ' ', re.sub(r'\bAttendanc\w*', '', s, flags=re.IGNORECASE)).strip()
+
+
 def _term_from(path) -> str:
-    stem = path.stem.removesuffix('_pseudonymised')
-    return re.sub(r'\s+', ' ', re.sub(r'\bAttendance\b', '', stem, flags=re.IGNORECASE)).strip()
+    return _strip_attendance(path.stem.removesuffix('_pseudonymised'))
 
 
 def _resolve_year(wb) -> int | None:
@@ -317,6 +389,8 @@ def ingest_folder(output_root, db: AttendanceDb, parsers: list | None = None) ->
         term, year = _term_from(path), _resolve_year(wb)
         rel = path.relative_to(output_root).as_posix()
         for ws in wb.worksheets:
+            if ws.title.strip().lower() == 'readme':
+                continue  # explanatory tab; never holds attendance data
             parser = next((p for p in parsers if p.matches(ws)), None)
             if parser is None:
                 report.unhandled.append((rel, ws.title))

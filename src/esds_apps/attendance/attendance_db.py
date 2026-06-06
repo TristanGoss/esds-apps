@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS activity (
     event_id      INTEGER NOT NULL REFERENCES event(event_id),
     name          TEXT NOT NULL,
     activity_type TEXT,
+    difficulty    TEXT,
     date          TEXT NOT NULL,
     UNIQUE(event_id, name, date)
 );
@@ -96,11 +97,12 @@ CREATE TABLE IF NOT EXISTS attendance_count (
 CREATE INDEX IF NOT EXISTS idx_activity_date ON activity(date);
 
 CREATE VIEW IF NOT EXISTS activity_attendance AS
-SELECT a.activity_id, a.event_id, a.date, a.activity_type,
+SELECT a.activity_id, a.event_id, e.event_type, a.date, a.activity_type, a.difficulty,
        COALESCE(named.n, 0)                       AS named_total,
        COALESCE(agg.n, 0)                         AS aggregate_total,
        COALESCE(named.n, 0) + COALESCE(agg.n, 0)  AS total
 FROM activity a
+JOIN event e USING (event_id)
 LEFT JOIN (SELECT activity_id, COUNT(*) AS n FROM attendance
            WHERE attended = 1 GROUP BY activity_id) named USING (activity_id)
 LEFT JOIN (SELECT activity_id, SUM(head_count) AS n FROM attendance_count
@@ -145,13 +147,18 @@ class AttendanceDb:
     # ---- events ----
 
     def upsert_event(self, name: str, event_type: EventType, venue: str | None = None) -> int:
-        """Insert or update an event by its unique name; return its id."""
+        """Insert or update an event by its unique name; return its id.
+
+        ``event_type`` is set on first insert and sticky thereafter: re-ingest never
+        overwrites it, so the classifier's first guess (or a later manual correction)
+        survives. ``venue`` is COALESCE'd, so it can be filled in later but not wiped.
+        """
         row = self.conn.execute('SELECT event_id FROM event WHERE name = ?', (name,)).fetchone()
         if row:
             event_id = row[0]
             self.conn.execute(
-                'UPDATE event SET event_type = ?, venue = COALESCE(?, venue) WHERE event_id = ?',
-                (str(event_type), venue, event_id),
+                'UPDATE event SET venue = COALESCE(?, venue) WHERE event_id = ?',
+                (venue, event_id),
             )
         else:
             cur = self.conn.execute(
@@ -175,23 +182,35 @@ class AttendanceDb:
     # ---- activities ----
 
     def upsert_activity(
-        self, event_id: int, name: str, date: date | datetime | str, activity_type: ActivityType | None = None
+        self,
+        event_id: int,
+        name: str,
+        date: date | datetime | str,
+        activity_type: ActivityType | None = None,
+        difficulty: str | None = None,
     ) -> int:
-        """Insert or update an activity by (event, name, date); return its id."""
+        """Insert or update an activity by (event, name, date); return its id.
+
+        ``difficulty`` is a free-text level ('Level 1', 'beginners', ...): it sits on the
+        activity, not the event, because weekenders and workshops mix levels within one
+        event. On re-ingest, activity_type and difficulty are COALESCE'd, so a None never
+        wipes a value set by an earlier pass.
+        """
         iso = _to_iso_date(date)
         row = self.conn.execute(
             'SELECT activity_id FROM activity WHERE event_id = ? AND name = ? AND date = ?', (event_id, name, iso)
         ).fetchone()
         if row:
             activity_id = row[0]
-            if activity_type is not None:
-                self.conn.execute(
-                    'UPDATE activity SET activity_type = ? WHERE activity_id = ?', (str(activity_type), activity_id)
-                )
+            self.conn.execute(
+                'UPDATE activity SET activity_type = COALESCE(?, activity_type), '
+                'difficulty = COALESCE(?, difficulty) WHERE activity_id = ?',
+                (str(activity_type) if activity_type else None, difficulty, activity_id),
+            )
         else:
             cur = self.conn.execute(
-                'INSERT INTO activity (event_id, name, activity_type, date) VALUES (?, ?, ?, ?)',
-                (event_id, name, str(activity_type) if activity_type else None, iso),
+                'INSERT INTO activity (event_id, name, activity_type, difficulty, date) VALUES (?, ?, ?, ?, ?)',
+                (event_id, name, str(activity_type) if activity_type else None, difficulty, iso),
             )
             activity_id = cur.lastrowid
         self.conn.commit()

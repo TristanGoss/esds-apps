@@ -45,12 +45,12 @@ def test_to_iso_date_accepts_date_datetime_and_string():
 # ---- events ----
 
 
-def test_upsert_event_returns_stable_id(db):
+def test_upsert_event_returns_stable_id_and_event_type_is_sticky(db):
     a = db.upsert_event('May-Jun 2025: Level 1', EventType.COURSE)
     b = db.upsert_event('May-Jun 2025: Level 1', EventType.SOCIAL, venue='The Counting House')
     assert a == b
     row = db.conn.execute('SELECT event_type, venue FROM event WHERE event_id=?', (a,)).fetchone()
-    assert row == ('social', 'The Counting House')
+    assert row == ('course', 'The Counting House')  # event_type sticky; venue filled in
 
 
 def test_upsert_event_does_not_clobber_venue_with_none(db):
@@ -84,6 +84,14 @@ def test_same_name_different_date_are_distinct_activities(db):
     a = db.upsert_activity(eid, 'Social', date(2025, 5, 1))
     b = db.upsert_activity(eid, 'Social', date(2025, 6, 1))
     assert a != b
+
+
+def test_upsert_activity_stores_and_keeps_difficulty(db):
+    eid = db.upsert_event('E', EventType.COURSE)
+    a = db.upsert_activity(eid, 'Week 1', date(2025, 5, 22), ActivityType.LESSON, difficulty='Level 1')
+    assert db.conn.execute('SELECT difficulty FROM activity WHERE activity_id=?', (a,)).fetchone()[0] == 'Level 1'
+    db.upsert_activity(eid, 'Week 1', date(2025, 5, 22))  # re-ingest with no difficulty must not wipe it
+    assert db.conn.execute('SELECT difficulty FROM activity WHERE activity_id=?', (a,)).fetchone()[0] == 'Level 1'
 
 
 # ---- attendance ----
