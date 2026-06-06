@@ -164,7 +164,7 @@ _NAME_SPEC = ('enc_name', 'name_hash', 'first_name', 'alt_first_name')
 _EMAIL_SPEC = ('enc_email', 'email_hash', 'email', 'alt_email')
 
 
-def _build_field_updates(  # noqa: PLR0913
+def _build_field_updates(
     fernet: Fernet,
     mac_key: bytes,
     existing_blob: str | None,
@@ -538,7 +538,7 @@ def _merge_updates(
     return updates
 
 
-def substitute_dancer_id(  # noqa: PLR0913
+def substitute_dancer_id(
     ctx: DbContext,
     old_id: str,
     new_id: str,

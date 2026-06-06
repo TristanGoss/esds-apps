@@ -77,6 +77,9 @@ convention = "google"
 [tool.ruff.lint.mccabe]
 max-complexity = 10
 
+[tool.ruff.lint.pylint]
+max-args = 6
+
 [tool.ruff.format]
 quote-style = "single"
 
