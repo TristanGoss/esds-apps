@@ -161,6 +161,24 @@ def _attended_register_ws(title='26 March 23'):
     return ws
 
 
+def _booking_list_ws(title='Attendees By Activity'):
+    """A booking list, NOT an attendance register.
+
+    Its 'present' column is mostly empty with the odd free-text note, and must not be read as
+    everyone being absent.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['A1'], ws['B1'], ws['C1'], ws['D1'] = 'dancer_id', 'redacted', 'Status', 'present'
+    ws['A2'], ws['C2'] = 'DNC-1', 'Confirmed'
+    ws['A3'], ws['C3'] = 'DNC-2', 'Confirmed'
+    ws['A4'], ws['C4'], ws['D4'] = 'DNC-3', 'Confirmed', 'no show'  # free-text note, not a mark
+    ws['A5'], ws['C5'], ws['D5'] = 'DNC-4', 'Confirmed', 'paid £10 cash on door'
+    ws['A6'], ws['C6'], ws['D6'] = 'DNC-5', 'Confirmed', 'refunded'  # a recognised non-attendance word
+    return ws
+
+
 # ---- value helpers ----
 
 
@@ -607,6 +625,11 @@ def test_social_register_matches_attended_marker_layout():
     """The 'Attended' single-block layout (Sunday Socials) is also a social register."""
     assert ingest.SocialRegisterParser().matches(_attended_register_ws())
     assert not ingest.RosterParser().matches(_attended_register_ws())  # no dated sessions
+
+
+def test_social_register_rejects_booking_list_with_empty_present_column():
+    """A booking list with a mostly-empty 'present' notes column is not an attendance register."""
+    assert not ingest.SocialRegisterParser().matches(_booking_list_ws())
 
 
 def test_social_register_parse_attended_layout_date_from_tab_name(db):

@@ -666,14 +666,39 @@ class SocialRegisterParser:
     name = 'social_register'
 
     def matches(self, ws) -> bool:
-        """True for a dancer_id register with an attendance marker but no dated session columns."""
+        """True for a dancer_id register whose marker column is predominantly attendance marks.
+
+        A 'Present?'/'Attended' header is not enough: a booking list can carry such a column
+        that is mostly empty with the odd free-text note ('no show', 'paid £10 cash on door'),
+        which must not be read as an attendance register. So the non-empty marker cells (against
+        DNC- rows) must be mostly real yes/no marks. Dated session columns disqualify it — that
+        is the weekly roster's job.
+        """
         matrix = list(ws.iter_rows(values_only=True))
         header = _roster_header(matrix)
         if header is None:
             return False
         header_row = header[0]
-        has_marker = any(_is_attendance_header(c) for c in matrix[header_row])
-        return has_marker and not _session_columns(matrix, header_row)
+        if _session_columns(matrix, header_row):
+            return False
+        filled, recognised = self._marker_fill(matrix, header_row, _register_blocks(matrix[header_row]))
+        return recognised > 0 and recognised >= filled / 2
+
+    @staticmethod
+    def _marker_fill(matrix: list[tuple], header_row: int, blocks: list[tuple]) -> tuple[int, int]:
+        """Count (non-empty, recognised-as-marker) marker cells against DNC- rows across blocks."""
+        filled = recognised = 0
+        for row in matrix[header_row + 1 :]:
+            for did_col, _, marker_col in blocks:
+                did = row[did_col] if did_col < len(row) else None
+                if not (isinstance(did, str) and did.startswith('DNC-')):
+                    continue
+                cell = row[marker_col] if marker_col < len(row) else None
+                if cell is None or (isinstance(cell, str) and not cell.strip()):
+                    continue
+                filled += 1
+                recognised += _is_attendance_marker(cell)
+        return filled, recognised
 
     def parse(
         self,
