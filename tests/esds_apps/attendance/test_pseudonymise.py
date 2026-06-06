@@ -332,6 +332,47 @@ def test_get_or_create_alt_first_name_not_overwritten(ctx):
     assert result['name']['alt_first_name'] == 'Xiaoling'  # not overwritten by 'Xiao'
 
 
+def test_get_or_create_stores_alt_last_name(ctx):
+    """Same email, different last name (e.g. married) → alt_last_name stored on existing record."""
+    did = pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+    )
+    pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Jones'}, {'email': 'alice@example.com'}
+    )
+    result = pseudonymise.decrypt_dancer(ctx, did)
+    assert result['name']['last_name'] == 'Smith'
+    assert result['name'].get('alt_last_name') == 'Jones'
+
+
+def test_get_or_create_alt_last_name_not_overwritten(ctx):
+    """alt_last_name is only written once; a third last name doesn't overwrite it."""
+    did = pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+    )
+    pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Jones'}, {'email': 'alice@example.com'}
+    )
+    pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Brown'}, {'email': 'alice@example.com'}
+    )
+    result = pseudonymise.decrypt_dancer(ctx, did)
+    assert result['name']['alt_last_name'] == 'Jones'  # not overwritten by 'Brown'
+
+
+def test_get_or_create_stores_alt_first_and_last_name_together(ctx):
+    """A differing first and last name on the same encounter are both captured."""
+    did = pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+    )
+    pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Ali', 'last_name': 'Jones'}, {'email': 'alice@example.com'}
+    )
+    result = pseudonymise.decrypt_dancer(ctx, did)
+    assert result['name']['alt_first_name'] == 'Ali'
+    assert result['name']['alt_last_name'] == 'Jones'
+
+
 def test_get_or_create_stores_alt_email(ctx):
     """Same name, different second email → alt_email stored on existing record."""
     did = pseudonymise.get_or_create_dancer_id(
@@ -823,6 +864,28 @@ def test_substitute_discards_conflict_first_name_by_default(ctx):
     result = pseudonymise.decrypt_dancer(ctx, id2)
     assert result['name']['first_name'] == 'Mary'
     assert 'alt_first_name' not in result['name']
+
+
+def test_substitute_stores_alt_last_name_when_explicitly_passed(ctx):
+    """conflict_last_name is stored as alt_last_name on new_id when provided."""
+    id1 = pseudonymise.get_or_create_dancer_id(
+        ctx, {'first_name': 'Mei', 'last_name': 'Smith'}, {'email': 'mei.smith@example.com'}
+    )
+    id2 = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Mei', 'last_name': 'Jones'}, None)
+    pseudonymise.substitute_dancer_id(ctx, id1, id2, conflict_last_name='Smith')
+    result = pseudonymise.decrypt_dancer(ctx, id2)
+    assert result['name']['last_name'] == 'Jones'
+    assert result['name']['alt_last_name'] == 'Smith'
+
+
+def test_substitute_discards_conflict_last_name_by_default(ctx):
+    """Without conflict_last_name, differing last names are silently dropped."""
+    id1 = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Mei', 'last_name': 'Smith'}, None)
+    id2 = pseudonymise.get_or_create_dancer_id(ctx, {'first_name': 'Mei', 'last_name': 'Jones'}, None)
+    pseudonymise.substitute_dancer_id(ctx, id1, id2)
+    result = pseudonymise.decrypt_dancer(ctx, id2)
+    assert result['name']['last_name'] == 'Jones'
+    assert 'alt_last_name' not in result['name']
 
 
 def test_substitute_stores_alt_email_when_explicitly_passed(ctx):

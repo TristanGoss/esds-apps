@@ -151,17 +151,27 @@ def _encrypt(fernet: Fernet, fields: dict) -> str:
     return fernet.encrypt(json.dumps(fields).encode()).decode()
 
 
-def _with_alt(fernet: Fernet, blob: str | None, alt_key: str, value: str) -> str | None:
-    """Return blob re-encrypted with alt_key set to value, or None if an alt is already present."""
+def _with_alts(fernet: Fernet, blob: str | None, additions: dict[str, str | None]) -> str | None:
+    """Return blob re-encrypted with the given alt fields added, or None if nothing changed.
+
+    Only fields with a truthy value that are not already present are added — alt fields
+    are written once and never overwritten.
+    """
     existing = _decrypt_fields(fernet, blob) or {}
-    if existing.get(alt_key):
+    to_add = {k: v for k, v in additions.items() if v and not existing.get(k)}
+    if not to_add:
         return None
-    return _encrypt(fernet, {**existing, alt_key: value})
+    return _encrypt(fernet, {**existing, **to_add})
 
 
-# (enc column, hash column, primary field, alt field) for each encrypted blob type.
-_NAME_SPEC = ('enc_name', 'name_hash', 'first_name', 'alt_first_name')
-_EMAIL_SPEC = ('enc_email', 'email_hash', 'email', 'alt_email')
+# (primary field, alt field) pairs within each encrypted blob. A name carries both a
+# first- and last-name alt (e.g. a surname change on marriage); an email carries one.
+_NAME_PAIRS = (('first_name', 'alt_first_name'), ('last_name', 'alt_last_name'))
+_EMAIL_PAIRS = (('email', 'alt_email'),)
+
+# (enc column, hash column, primary/alt pairs) for each encrypted blob type.
+_NAME_SPEC = ('enc_name', 'name_hash', _NAME_PAIRS)
+_EMAIL_SPEC = ('enc_email', 'email_hash', _EMAIL_PAIRS)
 
 
 def _build_field_updates(
@@ -170,15 +180,16 @@ def _build_field_updates(
     existing_blob: str | None,
     fields: dict[str, str] | None,
     hash_key: str | None,
-    spec: tuple[str, str, str, str],
+    spec: tuple[str, str, tuple[tuple[str, str], ...]],
 ) -> dict:
     """Compute the SQL column updates for one encrypted blob (name or email).
 
     On first encounter (no existing blob) encrypts the fields and stores the hash.
-    On a later encounter with a differing primary value, stores it as the alt field
-    (written once — never overwritten). Returns {} when there is nothing to change.
+    On a later encounter, any primary field whose value differs from the stored one is
+    saved as its alt field (written once — never overwritten). Returns {} when there is
+    nothing to change.
     """
-    enc_col, hash_col, primary, alt = spec
+    enc_col, hash_col, pairs = spec
     if existing_blob is None:
         if fields and hash_key:
             return {enc_col: _encrypt(fernet, fields), hash_col: _value_hash(hash_key, mac_key)}
@@ -186,12 +197,13 @@ def _build_field_updates(
     if not fields:
         return {}
     existing = _decrypt_fields(fernet, existing_blob) or {}
-    new_val = fields.get(primary, '').lower().strip()
-    if new_val and new_val != existing.get(primary, '').lower().strip():
-        updated = _with_alt(fernet, existing_blob, alt, fields[primary])
-        if updated is not None:
-            return {enc_col: updated}
-    return {}
+    additions = {}
+    for primary, alt in pairs:
+        new_val = fields.get(primary, '').lower().strip()
+        if new_val and new_val != existing.get(primary, '').lower().strip():
+            additions[alt] = fields[primary]
+    updated = _with_alts(fernet, existing_blob, additions)
+    return {enc_col: updated} if updated is not None else {}
 
 
 def get_or_create_dancer_id(
@@ -506,44 +518,40 @@ def _replace_id_in_files(output_dir: Path, old_id: str, new_id: str) -> None:
             wb.save(path)
 
 
-# (enc index, hash index, enc column, hash column, alt field) into the SELECTed row tuple.
+# (enc index, hash index, enc column, hash column, primary/alt pairs) into the SELECTed row tuple.
 _MERGE_SPECS = (
-    (0, 2, 'enc_name', 'name_hash', 'alt_first_name'),
-    (1, 3, 'enc_email', 'email_hash', 'alt_email'),
+    (0, 2, 'enc_name', 'name_hash', _NAME_PAIRS),
+    (1, 3, 'enc_email', 'email_hash', _EMAIL_PAIRS),
 )
 
 
-def _merge_updates(
-    fernet: Fernet,
-    old_row: tuple,
-    new_row: tuple,
-    conflict_first_name: str | None,
-    conflict_email: str | None,
-) -> dict:
+def _merge_updates(fernet: Fernet, old_row: tuple, new_row: tuple, conflicts: dict[str, str | None]) -> dict:
     """Compute the column updates to apply to new_id when merging old_id into it.
 
-    For each blob: move old's value across if new lacks it; otherwise store the
-    supplied conflict value as the alt field (written once, never overwritten).
-    Both rows are (enc_name, enc_email, name_hash, email_hash) tuples.
+    For each blob: move old's value across if new lacks it; otherwise store any supplied
+    conflict value as its alt field (written once, never overwritten). conflicts is keyed
+    by primary field name ('first_name', 'last_name', 'email'). Both rows are
+    (enc_name, enc_email, name_hash, email_hash) tuples.
     """
-    conflicts = (conflict_first_name, conflict_email)
     updates = {}
-    for (enc_i, hash_i, enc_col, hash_col, alt_key), conflict in zip(_MERGE_SPECS, conflicts):
+    for enc_i, hash_i, enc_col, hash_col, pairs in _MERGE_SPECS:
         if new_row[enc_i] is None and old_row[enc_i] is not None:
             updates[enc_col], updates[hash_col] = old_row[enc_i], old_row[hash_i]
-        elif conflict is not None and new_row[enc_i] is not None:
-            enc = _with_alt(fernet, new_row[enc_i], alt_key, conflict)
+        elif new_row[enc_i] is not None:
+            additions = {alt: conflicts.get(primary) for primary, alt in pairs}
+            enc = _with_alts(fernet, new_row[enc_i], additions)
             if enc is not None:
                 updates[enc_col] = enc
     return updates
 
 
-def substitute_dancer_id(
+def substitute_dancer_id(  # noqa: PLR0913
     ctx: DbContext,
     old_id: str,
     new_id: str,
     output_dir: Path | None = None,
     conflict_first_name: str | None = None,
+    conflict_last_name: str | None = None,
     conflict_email: str | None = None,
 ) -> None:
     """Replace old_id with new_id in the database and all xlsx files in output_dir.
@@ -552,10 +560,10 @@ def substitute_dancer_id(
     deletes old_id. Delete happens before update to avoid UNIQUE constraint conflicts
     when moving a name_hash or email_hash from one row to another.
 
-    When both records have differing first names, pass conflict_first_name to store
-    the discarded first name as alt_first_name on new_id. When both records have
-    differing emails, pass conflict_email to store it as alt_email. Leave either None
-    to discard silently.
+    When both records have a differing first name, last name, or email, pass
+    conflict_first_name / conflict_last_name / conflict_email to store the discarded
+    value as alt_first_name / alt_last_name / alt_email on new_id (each written once,
+    never overwritten). Leave any of them None to discard that field silently.
     """
     old_row = ctx.conn.execute(
         'SELECT enc_name, enc_email, name_hash, email_hash FROM pseudonyms WHERE dancer_id=?',
@@ -574,7 +582,12 @@ def substitute_dancer_id(
     # Delete first so the UNIQUE constraints on name_hash/email_hash are freed.
     ctx.conn.execute('DELETE FROM pseudonyms WHERE dancer_id=?', (old_id,))
 
-    updates = _merge_updates(ctx.fernet, old_row, new_row, conflict_first_name, conflict_email)
+    conflicts = {
+        'first_name': conflict_first_name,
+        'last_name': conflict_last_name,
+        'email': conflict_email,
+    }
+    updates = _merge_updates(ctx.fernet, old_row, new_row, conflicts)
     if updates:
         set_clause = ', '.join(f'{k}=?' for k in updates)
         ctx.conn.execute(f'UPDATE pseudonyms SET {set_clause} WHERE dancer_id=?', (*updates.values(), new_id))
