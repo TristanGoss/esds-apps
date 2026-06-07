@@ -27,6 +27,19 @@ class ActivityType(StrEnum):
     SOCIAL = 'social'
 
 
+class AttendanceStatus(StrEnum):
+    # We have a positive record that the dancer was there.
+    ATTENDED = 'attended'
+    # We have a positive record that the dancer was *not* there: an enrolled/booked dancer
+    # marked absent, a no-show, or a refunded ticket. They were expected but didn't come.
+    ABSENT = 'absent'
+    # We have a record of the dancer for this activity (they bought a ticket or appear on the
+    # register) but whether they actually attended was never captured. Distinct from ATTENDED
+    # and ABSENT: the row still records genuine interest, it just can't be counted as a head.
+    # The row's existence is the evidence of interest; the status says the turnout is unknown.
+    UNKNOWN = 'unknown'
+
+
 class TicketType(StrEnum):
     MEMBER = 'member'
     CONCESSION = 'concession'
@@ -87,7 +100,7 @@ CREATE TABLE IF NOT EXISTS attendance (
     attendance_id INTEGER PRIMARY KEY,
     activity_id   INTEGER NOT NULL REFERENCES activity(activity_id),
     dancer_id     TEXT NOT NULL REFERENCES dancer(dancer_id),
-    attended      INTEGER NOT NULL,
+    status        TEXT NOT NULL,
     ticket_type   TEXT,
     ingest_id     INTEGER REFERENCES ingest_log(ingest_id),
     source_cell   TEXT,
@@ -120,11 +133,17 @@ CREATE VIEW IF NOT EXISTS activity_attendance AS
 SELECT a.activity_id, a.event_id, e.event_type, a.date, a.activity_type, a.difficulty,
        COALESCE(named.n, 0)                       AS named_total,
        COALESCE(agg.n, 0)                         AS aggregate_total,
-       COALESCE(named.n, 0) + COALESCE(agg.n, 0)  AS total
+       COALESCE(named.n, 0) + COALESCE(agg.n, 0)  AS total,
+       COALESCE(unknown.n, 0)                     AS named_unknown,
+       COALESCE(reg.n, 0)                         AS named_registered
 FROM activity a
 JOIN event e USING (event_id)
 LEFT JOIN (SELECT activity_id, COUNT(*) AS n FROM attendance
-           WHERE attended = 1 GROUP BY activity_id) named USING (activity_id)
+           WHERE status = 'attended' GROUP BY activity_id) named USING (activity_id)
+LEFT JOIN (SELECT activity_id, COUNT(*) AS n FROM attendance
+           WHERE status = 'unknown' GROUP BY activity_id) unknown USING (activity_id)
+LEFT JOIN (SELECT activity_id, COUNT(*) AS n FROM attendance
+           GROUP BY activity_id) reg USING (activity_id)
 LEFT JOIN (SELECT activity_id, SUM(head_count) AS n FROM attendance_count
            GROUP BY activity_id) agg USING (activity_id);
 """
@@ -242,22 +261,27 @@ class AttendanceDb:
         self,
         activity_id: int,
         dancer_id: str,
-        attended: bool,
+        status: AttendanceStatus,
         ticket_type: TicketType | None = None,
         ingest_id: int | None = None,
         source_cell: str | None = None,
     ) -> None:
-        """Upsert one identified dancer's attendance at an activity (one row per pair)."""
+        """Upsert one identified dancer's attendance at an activity (one row per pair).
+
+        ``status`` is an :class:`AttendanceStatus` rather than a bool so the row says exactly
+        what is known — attended, absent, or attendance-unknown — without a reader having to
+        infer it from a NULL or a missing row.
+        """
         self.ensure_dancer(dancer_id)
         self.conn.execute(
-            'INSERT INTO attendance (activity_id, dancer_id, attended, ticket_type, ingest_id, source_cell) '
+            'INSERT INTO attendance (activity_id, dancer_id, status, ticket_type, ingest_id, source_cell) '
             'VALUES (?, ?, ?, ?, ?, ?) '
             'ON CONFLICT(activity_id, dancer_id) DO UPDATE SET '
-            '  attended = excluded.attended, '
+            '  status = excluded.status, '
             '  ticket_type = COALESCE(excluded.ticket_type, ticket_type), '
             '  ingest_id = excluded.ingest_id, '
             '  source_cell = excluded.source_cell',
-            (activity_id, dancer_id, int(bool(attended)), _tt(ticket_type), ingest_id, source_cell),
+            (activity_id, dancer_id, str(status), _tt(ticket_type), ingest_id, source_cell),
         )
         self.conn.commit()
 

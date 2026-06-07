@@ -206,6 +206,43 @@ def _booking_list_ws(title='Attendees By Activity'):
     return ws
 
 
+def _booking_by_activity_ws(title='Attendees By Activity'):
+    """A dancecloud 'Attendees By Activity' booking view: one row per dancer per dated session.
+
+    No attendance is recorded — a row only means a ticket was held for that date. DNC-1 holds a
+    ticket for both sessions; DNC-2 cancelled the second; DNC-3 holds two tickets for session 1.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['A1'], ws['B1'], ws['C1'], ws['D1'] = 'dancer_id', 'Activity', 'Date', 'Status'
+    rows = [
+        ('DNC-1', 'Lesson', datetime(2023, 1, 19, 19, 15), 'Confirmed'),
+        ('DNC-1', 'Lesson', datetime(2023, 1, 26, 19, 15), 'Confirmed'),
+        ('DNC-2', 'Lesson', datetime(2023, 1, 19, 19, 15), 'Confirmed'),
+        ('DNC-2', 'Lesson', datetime(2023, 1, 26, 19, 15), 'Cancelled'),
+        ('DNC-3', 'Lesson', datetime(2023, 1, 19, 19, 15), 'Confirmed'),
+        ('DNC-3', 'Lesson', datetime(2023, 1, 19, 19, 15), 'Confirmed'),  # un-renamed extra ticket
+    ]
+    for i, (did, act, dt, status) in enumerate(rows, start=2):
+        ws[f'A{i}'], ws[f'B{i}'], ws[f'C{i}'], ws[f'D{i}'] = did, act, dt, status
+    return ws
+
+
+def _booking_summary_ws(title='Attendees'):
+    """The plain booking summary: a booking Status but no Date column and no present column.
+
+    Deliberately NOT claimed — it is the same bookings as 'Attendees By Activity' without dates.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['A1'], ws['B1'], ws['C1'], ws['D1'] = 'dancer_id', 'Ticket Type', 'Concession', 'Status'
+    ws['A2'], ws['B2'], ws['C2'], ws['D2'] = 'DNC-1', 'Level 1 Term A', 'No', 'Confirmed'
+    ws['A3'], ws['B3'], ws['C3'], ws['D3'] = 'DNC-2', 'Level 1 Term A', 'Yes', 'Confirmed'
+    return ws
+
+
 # ---- value helpers ----
 
 
@@ -345,10 +382,10 @@ def test_roster_parse_reads_mixed_truthy_markers(db):
     ingest.RosterParser().parse(_roster_ws(), db, term='T', year=2025, ingest_id=None)
     # Week 1: DNC-1 (True), DNC-2 (☑️), DNC-3 ('x') all attended
     rows = db.conn.execute(
-        'SELECT dancer_id, attended FROM attendance JOIN activity USING(activity_id) '
+        'SELECT dancer_id, status FROM attendance JOIN activity USING(activity_id) '
         "WHERE name='Week 1' ORDER BY dancer_id"
     ).fetchall()
-    assert rows == [('DNC-1', 1), ('DNC-2', 1), ('DNC-3', 1)]
+    assert rows == [('DNC-1', 'attended'), ('DNC-2', 'attended'), ('DNC-3', 'attended')]
 
 
 def test_roster_parse_duplicate_ticket_becomes_anonymous_count(db):
@@ -368,11 +405,35 @@ def test_roster_refunded_and_false_are_absent(db):
     ingest.RosterParser().parse(_roster_ws(), db, term='T', year=2025, ingest_id=None)
     w2 = dict(
         db.conn.execute(
-            "SELECT dancer_id, attended FROM attendance JOIN activity USING(activity_id) WHERE name='Week 2'"
+            "SELECT dancer_id, status FROM attendance JOIN activity USING(activity_id) WHERE name='Week 2'"
         ).fetchall()
     )
-    assert w2['DNC-2'] == 0  # 'False'
-    assert w2['DNC-3'] == 0  # 'Refunded'
+    assert w2['DNC-2'] == 'absent'  # 'False'
+    assert w2['DNC-3'] == 'absent'  # 'Refunded'
+
+
+def test_roster_blank_column_is_unknown_not_absent(db):
+    """A dated session column nobody marked means turnout unrecorded, not a class-wide no-show."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Level 1 Attendance'
+    ws['C1'], ws['D1'] = datetime(2022, 6, 16), datetime(2022, 6, 23)  # two dated weeks
+    ws['B2'], ws['C2'], ws['D2'] = 'dancer_id', 'Week 1', 'Week 2'
+    ws['B3'], ws['C3'] = 'DNC-1', 'x'  # Week 1 marked; Week 2 entirely blank
+    ws['B4'] = 'DNC-2'
+    ingest.RosterParser().parse(ws, db, term='T', year=2022, ingest_id=None)
+    w1 = dict(
+        db.conn.execute(
+            "SELECT dancer_id, status FROM attendance JOIN activity USING(activity_id) WHERE name='Week 1'"
+        ).fetchall()
+    )
+    w2 = dict(
+        db.conn.execute(
+            "SELECT dancer_id, status FROM attendance JOIN activity USING(activity_id) WHERE name='Week 2'"
+        ).fetchall()
+    )
+    assert w1 == {'DNC-1': 'attended', 'DNC-2': 'absent'}  # a marked column is a real register
+    assert w2 == {'DNC-1': 'unknown', 'DNC-2': 'unknown'}  # an unmarked column fabricates no absences
 
 
 def test_roster_infers_weekly_dates_from_anchor(db):
@@ -573,6 +634,23 @@ def test_ingest_folder_skips_member_and_mail_sheets(tmp_path, db):
     assert report.unhandled == []  # silently skipped, not in unhandled
 
 
+def test_ingest_folder_skips_membership_workbooks(tmp_path, db):
+    """Membership / master-members workbooks are purchases, not class or social attendance.
+
+    Their 'Attendees By Activity' sheet is shaped exactly like a class booking export, so the
+    skip is by filename: the whole workbook is passed over before any parser sees it.
+    """
+    root = tmp_path / 'outputs'
+    root.mkdir()
+    ws = _booking_by_activity_ws()  # the booking-export shape a membership file would also have
+    ws.parent.save(root / 'ESDS Membership Attendees 2022-11-02_pseudonymised.xlsx')
+
+    report = ingest.ingest_folder(root, db)
+    assert report.handled == []
+    assert report.unhandled == []  # skipped wholesale by filename, not flagged as needing a parser
+    assert db.conn.execute('SELECT COUNT(*) FROM event').fetchone() == (0,)
+
+
 def test_ingest_folder_skips_bookkeeping_sheets(tmp_path, db):
     """'Exceptions', 'Loyalty' and 'Tickets' tabs carry no per-session attendance."""
     root = tmp_path / 'outputs'
@@ -586,18 +664,6 @@ def test_ingest_folder_skips_bookkeeping_sheets(tmp_path, db):
     report = ingest.ingest_folder(root, db)
     assert report.handled == []
     assert report.unhandled == []  # silently skipped, not in unhandled
-
-
-def test_ingest_folder_skips_2022_wholesale(tmp_path, db):
-    """Anything under a 2022 folder is skipped before a workbook is even opened."""
-    root = tmp_path / 'outputs'
-    (root / '2022 Attendance Records').mkdir(parents=True)
-    _roster_ws().parent.save(root / '2022 Attendance Records' / 'Level 1 Attendance_pseudonymised.xlsx')
-
-    report = ingest.ingest_folder(root, db)
-    assert report.handled == []
-    assert report.unhandled == []
-    assert db.conn.execute('SELECT COUNT(*) FROM activity').fetchone() == (0,)
 
 
 # ---- L2 & SO attendance parsing ----
@@ -630,17 +696,17 @@ def test_l2_so_parse_records_attendance_by_category(db):
 
     # DNC-1: 'Level 2 & Social' on 01-15 -> Level 2 attended; 'Social-Only' on 01-22 -> social.
     dnc1 = db.conn.execute(
-        'SELECT a.name, att.attended FROM attendance att JOIN activity a USING(activity_id) '
+        'SELECT a.name, att.status FROM attendance att JOIN activity a USING(activity_id) '
         "WHERE att.dancer_id='DNC-1' ORDER BY a.name"
     ).fetchall()
-    assert dnc1 == [('Level 2 (2026-01-15)', 1), ('Social (2026-01-22)', 1)]
+    assert dnc1 == [('Level 2 (2026-01-15)', 'attended'), ('Social (2026-01-22)', 'attended')]
 
     # DNC-2: 'Absent' on 01-15 -> Level 2 roster row, did not attend; 'Level 2 & Social' on 01-22.
     dnc2 = db.conn.execute(
-        'SELECT a.name, att.attended FROM attendance att JOIN activity a USING(activity_id) '
+        'SELECT a.name, att.status FROM attendance att JOIN activity a USING(activity_id) '
         "WHERE att.dancer_id='DNC-2' ORDER BY a.name"
     ).fetchall()
-    assert dnc2 == [('Level 2 (2026-01-15)', 0), ('Level 2 (2026-01-22)', 1)]
+    assert dnc2 == [('Level 2 (2026-01-15)', 'absent'), ('Level 2 (2026-01-22)', 'attended')]
 
 
 # ---- social register parsing (Tea Dances etc.) ----
@@ -671,8 +737,9 @@ def test_social_register_parse_reads_both_halves_with_ticket_and_absence(db):
     ingest.SocialRegisterParser().parse(
         _social_register_ws(), db, term='Tea Dance 25 Feb 2024', year=None, ingest_id=None
     )
-    rows = dict(db.conn.execute('SELECT dancer_id, attended FROM attendance').fetchall())
-    assert rows == {'DNC-1': 1, 'DNC-2': 1, 'DNC-3': 1, 'DNC-5': 0}  # DNC-3 (right half) read; DNC-5 absent
+    rows = dict(db.conn.execute('SELECT dancer_id, status FROM attendance').fetchall())
+    # DNC-3 (right half) read; DNC-5 absent
+    assert rows == {'DNC-1': 'attended', 'DNC-2': 'attended', 'DNC-3': 'attended', 'DNC-5': 'absent'}
     # Concession Yes -> member_or_concession (not ordinary); No -> ordinary.
     tickets = dict(db.conn.execute('SELECT dancer_id, ticket_type FROM attendance').fetchall())
     assert tickets == {
@@ -688,7 +755,7 @@ def test_social_register_parse_duplicate_ticket_becomes_anonymous_extra(db):
     ingest.SocialRegisterParser().parse(
         _social_register_ws(), db, term='Tea Dance 25 Feb 2024', year=None, ingest_id=None
     )
-    assert db.conn.execute("SELECT attended FROM attendance WHERE dancer_id='DNC-1'").fetchall() == [(1,)]
+    assert db.conn.execute("SELECT status FROM attendance WHERE dancer_id='DNC-1'").fetchall() == [('attended',)]
     assert db.conn.execute('SELECT ticket_type, head_count FROM attendance_count').fetchall() == [(None, 1)]
     # view total: 3 named present (DNC-1/2/3) + 1 anonymous extra = 4
     assert db.conn.execute('SELECT named_total, aggregate_total, total FROM activity_attendance').fetchone() == (
@@ -717,8 +784,86 @@ def test_social_register_parse_attended_layout_date_from_tab_name(db):
     # event name has 'Attendees' stripped; activity dated from the tab name, not the filename's 25th
     assert db.conn.execute('SELECT name, event_type FROM event').fetchone() == ('Sunday Social 2023-03-25', 'social')
     assert db.conn.execute('SELECT date FROM activity').fetchone() == ('2023-03-26',)
-    rows = dict(db.conn.execute('SELECT dancer_id, attended FROM attendance').fetchall())
-    assert rows == {'DNC-1': 1, 'DNC-2': 1, 'DNC-3': 0}  # DNC-3 booked but absent
+    rows = dict(db.conn.execute('SELECT dancer_id, status FROM attendance').fetchall())
+    assert rows == {'DNC-1': 'attended', 'DNC-2': 'attended', 'DNC-3': 'absent'}  # DNC-3 booked but absent
     # DNC-2's two 'x' tickets -> one named + one anonymous extra; no concession column -> ticket NULL
     assert db.conn.execute('SELECT ticket_type, head_count FROM attendance_count').fetchall() == [(None, 1)]
     assert {r[0] for r in db.conn.execute('SELECT DISTINCT ticket_type FROM attendance')} == {None}
+
+
+# ---- booking export parsing ----
+
+
+@pytest.mark.parametrize(
+    'status, present, expected',
+    [
+        ('Confirmed', None, 'unknown'),  # a bought ticket, turnout never captured
+        ('Confirmed', '', 'unknown'),
+        ('Cancelled', None, 'absent'),  # booked then pulled out
+        ('Confirmed', 'no show', 'absent'),
+        ('Confirmed', 'refunded', 'absent'),
+        ('Confirmed', 'refunded as resold on door', 'absent'),  # refund beats the 'door' word
+        ('Confirmed', 'paid £10 cash on door', 'attended'),  # demonstrably there
+        ('Confirmed', 'x', 'attended'),
+        (None, None, 'unknown'),
+    ],
+)
+def test_booking_status(status, present, expected):
+    assert ingest._booking_status(status, present) == expected
+
+
+def test_booking_export_matches_only_dated_or_present_status_lists():
+    p = ingest.BookingExportParser()
+    assert p.matches(_booking_by_activity_ws())  # dated booking view
+    assert p.matches(_booking_list_ws())  # single-event list with a present-note column
+    assert not p.matches(_booking_summary_ws())  # Status but no Date and no present -> not claimed
+    assert not p.matches(_roster_ws())  # an attendance roster has no booking Status column
+
+
+def test_booking_export_dated_records_unknown_per_session(db):
+    """Each dated booking is an UNKNOWN registration; a cancelled one is ABSENT; none attended."""
+    ingest.BookingExportParser().parse(
+        _booking_by_activity_ws(), db, term='Level 1 Fundamentals Term A 2023-01-17 2255', year=2023, ingest_id=None
+    )
+    # export tail stripped from the event name; the year disambiguates same-named terms
+    assert db.conn.execute('SELECT name, event_type FROM event').fetchone() == (
+        'Level 1 Fundamentals Term A (2023)',
+        'course',
+    )
+    assert sorted(r[0] for r in db.conn.execute('SELECT date FROM activity')) == ['2023-01-19', '2023-01-26']
+    rows = db.conn.execute(
+        'SELECT a.date, at.dancer_id, at.status FROM attendance at JOIN activity a USING(activity_id) '
+        'ORDER BY a.date, at.dancer_id'
+    ).fetchall()
+    assert rows == [
+        ('2023-01-19', 'DNC-1', 'unknown'),
+        ('2023-01-19', 'DNC-2', 'unknown'),
+        ('2023-01-19', 'DNC-3', 'unknown'),  # the two session-1 tickets collapse to one row
+        ('2023-01-26', 'DNC-1', 'unknown'),
+        ('2023-01-26', 'DNC-2', 'absent'),  # cancelled booking
+    ]
+    assert db.conn.execute("SELECT COUNT(*) FROM attendance WHERE status='attended'").fetchone() == (0,)
+
+
+def test_booking_export_single_event_is_mostly_unknown(db):
+    """The 2023 Christmas Party shape: a present-note column, date from the filename."""
+    ingest.BookingExportParser().parse(
+        _booking_list_ws(), db, term='Christmas Party with Ian Ewing 14 Dec 2023', year=2023, ingest_id=None
+    )
+    assert db.conn.execute('SELECT name, event_type FROM event').fetchone() == (
+        'Christmas Party with Ian Ewing (2023)',
+        'social',
+    )
+    assert db.conn.execute('SELECT date FROM activity').fetchone() == ('2023-12-14',)
+    rows = dict(db.conn.execute('SELECT dancer_id, status FROM attendance').fetchall())
+    assert rows == {
+        'DNC-1': 'unknown',  # confirmed booking, no note
+        'DNC-2': 'unknown',
+        'DNC-3': 'absent',  # 'no show'
+        'DNC-4': 'attended',  # 'paid cash on door'
+        'DNC-5': 'absent',  # 'refunded'
+    }
+    # interest is recorded without inflating attendance: 5 registered, 2 unknown, 1 attended
+    assert db.conn.execute(
+        'SELECT named_total, named_unknown, named_registered FROM activity_attendance'
+    ).fetchone() == (1, 2, 5)

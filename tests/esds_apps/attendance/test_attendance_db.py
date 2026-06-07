@@ -4,6 +4,7 @@ import pytest
 
 from esds_apps.attendance.attendance_db import (
     ActivityType,
+    AttendanceStatus,
     EventType,
     TicketType,
     _to_iso_date,
@@ -109,16 +110,24 @@ def test_upsert_activity_stores_and_keeps_difficulty(db):
 def test_record_attendance_one_row_per_pair(db):
     eid = db.upsert_event('E', EventType.COURSE)
     act = db.upsert_activity(eid, 'W1', date(2025, 5, 22))
-    db.record_attendance(act, 'DNC-1', attended=False)
-    db.record_attendance(act, 'DNC-1', attended=True, ticket_type=TicketType.MEMBER)  # upsert
-    rows = db.conn.execute('SELECT attended, ticket_type FROM attendance WHERE activity_id=?', (act,)).fetchall()
-    assert rows == [(1, 'member')]
+    db.record_attendance(act, 'DNC-1', status=AttendanceStatus.ABSENT)
+    db.record_attendance(act, 'DNC-1', status=AttendanceStatus.ATTENDED, ticket_type=TicketType.MEMBER)  # upsert
+    rows = db.conn.execute('SELECT status, ticket_type FROM attendance WHERE activity_id=?', (act,)).fetchall()
+    assert rows == [('attended', 'member')]
+
+
+def test_record_attendance_stores_unknown_status(db):
+    # A bought-ticket-but-turnout-unknown row: kept as evidence of interest, never a confirmed head.
+    eid = db.upsert_event('E', EventType.SOCIAL)
+    act = db.upsert_activity(eid, 'Social', date(2023, 12, 14))
+    db.record_attendance(act, 'DNC-7', status=AttendanceStatus.UNKNOWN)
+    assert db.conn.execute('SELECT status FROM attendance WHERE activity_id=?', (act,)).fetchone() == ('unknown',)
 
 
 def test_record_attendance_registers_dancer(db):
     eid = db.upsert_event('E', EventType.COURSE)
     act = db.upsert_activity(eid, 'W1', date(2025, 5, 22))
-    db.record_attendance(act, 'DNC-Z', attended=True)
+    db.record_attendance(act, 'DNC-Z', status=AttendanceStatus.ATTENDED)
     assert db.conn.execute('SELECT 1 FROM dancer WHERE dancer_id=?', ('DNC-Z',)).fetchone() == (1,)
 
 
@@ -186,7 +195,7 @@ def test_record_waitlist_named_and_count_coexist_and_sum(db):
 def test_record_waitlist_stays_out_of_attendance_totals(db):
     eid = db.upsert_event('E', EventType.COURSE)
     act = db.upsert_activity(eid, 'W1', date(2025, 5, 22))
-    db.record_attendance(act, 'DNC-1', attended=True)
+    db.record_attendance(act, 'DNC-1', status=AttendanceStatus.ATTENDED)
     db.record_waitlist(eid, 'DNC-2')  # waitlisted, not an attendee
     row = db.conn.execute(
         'SELECT named_total, aggregate_total, total FROM activity_attendance WHERE activity_id=?', (act,)
@@ -200,11 +209,39 @@ def test_record_waitlist_stays_out_of_attendance_totals(db):
 def test_view_combines_named_and_aggregate(db):
     eid = db.upsert_event('E', EventType.COURSE)
     act = db.upsert_activity(eid, 'W1', date(2025, 5, 22))
-    db.record_attendance(act, 'DNC-1', attended=True)
-    db.record_attendance(act, 'DNC-2', attended=True)
-    db.record_attendance(act, 'DNC-3', attended=False)  # not counted
+    db.record_attendance(act, 'DNC-1', status=AttendanceStatus.ATTENDED)
+    db.record_attendance(act, 'DNC-2', status=AttendanceStatus.ATTENDED)
+    db.record_attendance(act, 'DNC-3', status=AttendanceStatus.ABSENT)  # not counted
     db.record_count(act, TicketType.MEMBER, 5)
     row = db.conn.execute(
         'SELECT named_total, aggregate_total, total FROM activity_attendance WHERE activity_id=?', (act,)
     ).fetchone()
     assert row == (2, 5, 7)
+
+
+def test_view_counts_unknown_separately_from_attendance(db):
+    # UNKNOWN rows show interest but are kept out of the attendance totals and surfaced on their own.
+    eid = db.upsert_event('E', EventType.SOCIAL)
+    act = db.upsert_activity(eid, 'Social', date(2023, 12, 14))
+    db.record_attendance(act, 'DNC-1', status=AttendanceStatus.ATTENDED)
+    db.record_attendance(act, 'DNC-2', status=AttendanceStatus.UNKNOWN)
+    db.record_attendance(act, 'DNC-3', status=AttendanceStatus.UNKNOWN)
+    row = db.conn.execute(
+        'SELECT named_total, total, named_unknown FROM activity_attendance WHERE activity_id=?', (act,)
+    ).fetchone()
+    assert row == (1, 1, 2)  # the two unknowns don't inflate attendance, but are counted as interest
+
+
+def test_view_named_registered_counts_every_named_row(db):
+    # 'Registered' is everyone named on the sheet, whatever their turnout: a weekly roster
+    # records the present as attended and the no-shows as absent, so registered >= attended.
+    eid = db.upsert_event('E', EventType.COURSE)
+    act = db.upsert_activity(eid, 'W1', date(2025, 5, 22))
+    db.record_attendance(act, 'DNC-1', status=AttendanceStatus.ATTENDED)
+    db.record_attendance(act, 'DNC-2', status=AttendanceStatus.ABSENT)
+    db.record_attendance(act, 'DNC-3', status=AttendanceStatus.UNKNOWN)
+    row = db.conn.execute(
+        'SELECT named_total, named_unknown, named_registered, total FROM activity_attendance WHERE activity_id=?',
+        (act,),
+    ).fetchone()
+    assert row == (1, 1, 3, 1)  # registered = attended+absent+unknown; total stays attended-only

@@ -30,7 +30,13 @@ from datetime import datetime, timedelta
 import openpyxl
 from openpyxl.utils import column_index_from_string, get_column_letter
 
-from esds_apps.attendance.attendance_db import ActivityType, AttendanceDb, EventType, TicketType
+from esds_apps.attendance.attendance_db import (
+    ActivityType,
+    AttendanceDb,
+    AttendanceStatus,
+    EventType,
+    TicketType,
+)
 
 _TICKET_LABELS = {
     'members': TicketType.MEMBER,
@@ -79,6 +85,46 @@ def _is_true(value) -> bool:
     return False
 
 
+def _present_status(present: bool) -> AttendanceStatus:
+    """Map a present/absent register reading to an AttendanceStatus.
+
+    These layouts are genuine attendance registers — a marked cell means present, a blank
+    means the dancer was expected (enrolled or booked) but didn't come — so the only two
+    outcomes are ATTENDED and ABSENT. The ticket-bought-but-turnout-unknown case (UNKNOWN)
+    comes from sources that record bookings without any attendance mark, handled elsewhere.
+    """
+    return AttendanceStatus.ATTENDED if present else AttendanceStatus.ABSENT
+
+
+# Booking exports (dancecloud) list who *bought a ticket*, not who turned up. Where a 'present'
+# note column exists it is the only attendance signal: these phrases mean the booker did not come
+# (a no-show, or a refund — including a ticket refunded because it was resold on the door)...
+_BOOKING_ABSENT_PRESENT = ('no show', 'no-show', 'noshow')
+# ...and these mean they were demonstrably there (paid / cash / at the door).
+_BOOKING_ATTENDED_PRESENT = ('door', 'cash', 'paid')
+
+
+def _booking_status(status_value, present_value=None) -> AttendanceStatus:
+    """Classify one booking row's turnout from its booking ``Status`` and optional ``present`` note.
+
+    Booking exports record purchases, so the default is UNKNOWN: a ticket was bought but whether
+    the dancer attended was never captured. A ``present`` note overrides where present — a no-show
+    or refund is ABSENT, a 'paid cash on the door' is ATTENDED — and a Cancelled booking is ABSENT
+    (interest registered, then pulled out). Refund is tested before the door words so 'refunded as
+    resold on door' reads as the booker's absence, not as an attendance.
+    """
+    present = present_value.strip().lower() if isinstance(present_value, str) else ''
+    if present:
+        if present.startswith('refund') or any(w in present for w in _BOOKING_ABSENT_PRESENT):
+            return AttendanceStatus.ABSENT
+        if _is_true(present_value) or any(w in present for w in _BOOKING_ATTENDED_PRESENT):
+            return AttendanceStatus.ATTENDED
+    status = status_value.strip().lower() if isinstance(status_value, str) else ''
+    if status.startswith('cancel'):
+        return AttendanceStatus.ABSENT
+    return AttendanceStatus.UNKNOWN
+
+
 def _is_attendance_marker(value) -> bool:
     """True if a cell value is a yes/no attendance marker (not a free-text category)."""
     if isinstance(value, bool):
@@ -125,6 +171,15 @@ def _month_number(name: str) -> int | None:
 _TITLE_DATE_RE = re.compile(r'(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)\s+(\d{2,4})', re.IGNORECASE)
 _ISO_DATE_RE = re.compile(r'(\d{4})-(\d{2})-(\d{2})')
 _CENTURY = 100  # 2-digit years (e.g. '23') are read as 2000 + year
+
+# Booking-export filenames end in the export timestamp or the event date, e.g. '... Term A
+# 2023-01-17 2255' or '... Chevaliers 14 Dec 2023' (sometimes with a note like 'members noted').
+# Strip that tail so several re-exports of one course collapse into a single event; the real
+# per-session dates live on the activities, not in the event name.
+_EXPORT_SUFFIX_RE = re.compile(
+    r'\s+(?:\d{4}-\d{2}-\d{2}|\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+\s+\d{2,4})\b.*$',
+    re.IGNORECASE,
+)
 
 
 def _date_from_title(text: str) -> datetime | None:
@@ -310,14 +365,21 @@ class RosterParser:
                 if isinstance(did, str) and did.startswith('DNC-'):
                     attended_by[did].append(_is_true(row[col]) if col < len(row) else False)
 
+            # A wholly-unmarked session column was never registered — nobody filled it in — so a
+            # blank cell there means 'turnout unknown', not a class-wide no-show. Only a column
+            # someone actually marked is read as a present/absent register; otherwise the enrolled
+            # dancers are recorded UNKNOWN (still registered, but attendance uncaptured).
+            column_marked = any(any(a) for a in attended_by.values())
+
             cell = f'{title}!{get_column_letter(col + 1)}'
             anonymous_extra = 0
             for did, attendeds in attended_by.items():
                 used = sum(attendeds)
+                status = _present_status(used >= 1) if column_marked else AttendanceStatus.UNKNOWN
                 db.record_attendance(
                     activity_id,
                     did,
-                    attended=used >= 1,
+                    status=status,
                     ticket_type=ticket_by_did.get(did),
                     ingest_id=ingest_id,
                     source_cell=cell,
@@ -560,7 +622,7 @@ class L2SOAttendanceParser:
       social, but per ESDS we record them as a Level 2 attendee only, not in the social).
     * ``Social-Only`` — at the social only.
     * ``Absent`` — signed up for Level 2 that night but didn't show: a Level 2 roster row
-      with ``attended = 0``.
+      with ``status = 'absent'``.
     * blank — no record.
 
     Each night therefore yields up to two activities, a Level 2 lesson and a social, and a
@@ -572,12 +634,12 @@ class L2SOAttendanceParser:
 
     name = 'l2_so_attendance'
 
-    # Category cell value (lower-cased) -> (activity it counts towards, did they attend).
+    # Category cell value (lower-cased) -> (activity it counts towards, attendance status).
     _CATEGORIES = {
-        'level 2 & social': (ActivityType.LESSON, True),
-        'social-only': (ActivityType.SOCIAL, True),
-        'social only': (ActivityType.SOCIAL, True),
-        'absent': (ActivityType.LESSON, False),  # signed up for Level 2, didn't show
+        'level 2 & social': (ActivityType.LESSON, AttendanceStatus.ATTENDED),
+        'social-only': (ActivityType.SOCIAL, AttendanceStatus.ATTENDED),
+        'social only': (ActivityType.SOCIAL, AttendanceStatus.ATTENDED),
+        'absent': (ActivityType.LESSON, AttendanceStatus.ABSENT),  # signed up for Level 2, didn't show
     }
 
     def matches(self, ws) -> bool:
@@ -629,11 +691,9 @@ class L2SOAttendanceParser:
                 entry = self._CATEGORIES.get(value.strip().lower()) if isinstance(value, str) else None
                 if entry is None:
                     continue
-                kind, attended = entry
+                kind, status = entry
                 cell = f'{title}!{get_column_letter(col + 1)}{r + 1}'
-                db.record_attendance(
-                    activity_for(dt, kind), did, attended=attended, ingest_id=ingest_id, source_cell=cell
-                )
+                db.record_attendance(activity_for(dt, kind), did, status=status, ingest_id=ingest_id, source_cell=cell)
 
 
 # ---------------------------------------------------------------------------
@@ -775,7 +835,7 @@ class SocialRegisterParser:
             db.record_attendance(
                 activity_id,
                 did,
-                attended=present_count >= 1,
+                status=_present_status(present_count >= 1),
                 ticket_type=ticket_type,
                 ingest_id=ingest_id,
                 source_cell=cell,
@@ -802,12 +862,114 @@ class SocialRegisterParser:
         return {did: tuple(acc) for did, acc in out.items()}
 
 
+class BookingExportParser:
+    """Parse a dancecloud booking export — who *bought a ticket*, not who turned up.
+
+    These exports are the only record for several early terms (2022 / early-2023 Level 1) and
+    one-off parties, and they carry no attendance: a dancer on the list — and again per session
+    on the 'Attendees By Activity' view — only means they held a ticket. So every booking is
+    recorded as UNKNOWN attendance (interest, never a counted head) unless a signal says otherwise.
+    Two shapes are handled:
+
+    * **dated** ('Attendees By Activity'): a ``Date`` column gives one row per dancer per session.
+      Each distinct date becomes an activity; every booking is UNKNOWN (a Cancelled one is ABSENT).
+    * **single-event** (the 2023 Christmas Party): no Date column, but a ``present`` column of
+      ad-hoc notes ('no show', 'refunded', 'paid cash on door'). The date comes from the title;
+      the note refines a row to ABSENT/ATTENDED, otherwise it stays UNKNOWN.
+
+    The plain 'Attendees' summary (a booking Status but no Date and no present column) is not
+    claimed: it is the same bookings as 'Attendees By Activity', minus the dates.
+    """
+
+    name = 'booking_export'
+
+    @staticmethod
+    def _columns(header: tuple) -> dict:
+        """Map lower-cased header label -> first column index."""
+        out: dict[str, int] = {}
+        for c, v in enumerate(header):
+            if isinstance(v, str) and v.strip():
+                out.setdefault(v.strip().lower(), c)
+        return out
+
+    @staticmethod
+    def _has_dates(matrix: list[tuple], header_row: int, date_col: int) -> bool:
+        return any(_parse_dt(row[date_col]) is not None for row in matrix[header_row + 1 :] if date_col < len(row))
+
+    def matches(self, ws) -> bool:
+        """True for a dancer_id + booking Status list that is either dated or has a present column."""
+        matrix = list(ws.iter_rows(values_only=True))
+        header = _roster_header(matrix)
+        if header is None:
+            return False
+        cols = self._columns(matrix[header[0]])
+        if 'dancer_id' not in cols or 'status' not in cols:
+            return False
+        if 'date' in cols and self._has_dates(matrix, header[0], cols['date']):
+            return True
+        return 'present' in cols
+
+    def parse(
+        self,
+        ws,
+        db: AttendanceDb,
+        term: str,
+        year: int | None,
+        ingest_id: int | None,
+        week_anchor: datetime | None = None,
+    ) -> None:
+        """Ingest one booking export: an activity per session, every row UNKNOWN unless noted."""
+        matrix = list(ws.iter_rows(values_only=True))
+        header_row, _ = _roster_header(matrix)
+        cols = self._columns(matrix[header_row])
+
+        event_type = _event_type_for(term)
+        event_id = db.upsert_event(_booking_event_name(term, year), event_type)
+        fallback_dt = _date_from_title(ws.title) or _date_from_title(term)
+        best = self._best_status_per_pair(matrix, header_row, cols, fallback_dt, ws.title)
+
+        activity_type = _activity_type_for(term, event_type)
+        difficulty = 'social' if activity_type == ActivityType.SOCIAL else _difficulty_for(term)
+        name = 'Social' if activity_type == ActivityType.SOCIAL else 'Lesson'
+        activities: dict[str, int] = {}
+        for (date_iso, did), (status, cell) in best.items():
+            if date_iso not in activities:
+                activities[date_iso] = db.upsert_activity(event_id, name, date_iso, activity_type, difficulty)
+            db.record_attendance(activities[date_iso], did, status=status, ingest_id=ingest_id, source_cell=cell)
+
+    @staticmethod
+    def _best_status_per_pair(matrix: list[tuple], header_row: int, cols: dict, fallback_dt, title: str) -> dict:
+        """One status per (date, dancer), keeping the most informative reading (attended>absent>unknown)."""
+        did_col, status_col = cols['dancer_id'], cols['status']
+        date_col, present_col = cols.get('date'), cols.get('present')
+        rank = {AttendanceStatus.UNKNOWN: 0, AttendanceStatus.ABSENT: 1, AttendanceStatus.ATTENDED: 2}
+        best: dict[tuple, tuple] = {}
+        for r in range(header_row + 1, len(matrix)):
+            row = matrix[r]
+            did = row[did_col] if did_col < len(row) else None
+            if not (isinstance(did, str) and did.startswith('DNC-')):
+                continue
+            dt = _parse_dt(row[date_col]) if date_col is not None and date_col < len(row) else None
+            dt = dt or fallback_dt
+            if dt is None:
+                continue
+            status = _booking_status(
+                row[status_col] if status_col < len(row) else None,
+                row[present_col] if present_col is not None and present_col < len(row) else None,
+            )
+            key = (dt.date().isoformat(), did)
+            if key not in best or rank[status] > rank[best[key][0]]:
+                best[key] = (status, f'{title}!{get_column_letter(did_col + 1)}{r + 1}')
+        return best
+
+
 PARSERS = [
     RosterParser(),
     Level2TallyParser(),
     Level2CountGridParser(),
     L2SOAttendanceParser(),
     SocialRegisterParser(),
+    BookingExportParser(),
 ]
 
 
@@ -842,6 +1004,16 @@ def _strip_attendance(s: str) -> str:
     """
     s = _LEVEL_2_3_RE.sub('Level 2', s)
     return re.sub(r'\s+', ' ', re.sub(r'\bAttend(?:anc|ee)\w*', '', s, flags=re.IGNORECASE)).strip()
+
+
+def _booking_event_name(term: str, year: int | None) -> str:
+    """A stable event name for a booking export: the course/party with its export tail stripped.
+
+    A year suffix keeps same-named courses in different years apart (Term A 2022 vs 2023) while
+    letting several re-exports of one term collapse into one event.
+    """
+    base = _EXPORT_SUFFIX_RE.sub('', _strip_attendance(term)).strip()
+    return f'{base} ({year})' if year else base
 
 
 def _term_from(path) -> str:
@@ -882,21 +1054,22 @@ def _week_anchor(wb) -> datetime | None:
 # are bookkeeping tabs that carry no per-session attendance.
 _NON_ATTENDANCE_SHEETS = ('readme', 'member', 'mail', 'exceptions', 'loyalty', 'tickets')
 
+# Whole workbooks that are membership purchases / dumps, not class or social attendance. Their
+# booking sheets ('Attendees By Activity') look just like a class booking export, so they must be
+# skipped by filename: a membership purchase is not turning up to anything we count.
+_NON_ATTENDANCE_FILES = ('membership', 'master members')
+
 
 def ingest_folder(output_root, db: AttendanceDb, parsers: list | None = None) -> IngestReport:
-    """Walk the attendance_outputs tree, dispatch each sheet to a matching parser.
-
-    2022 is skipped wholesale: its spreadsheets predate any layout the parsers target
-    and the data quality is too poor to ingest reliably.
-    """
+    """Walk the attendance_outputs tree, dispatch each sheet to a matching parser."""
     parsers = parsers if parsers is not None else PARSERS
     report = IngestReport()
     for path in sorted(output_root.rglob('*.xlsx')):
         if path.name.startswith(('~$', '.~lock')):
             continue
+        if any(token in path.stem.lower() for token in _NON_ATTENDANCE_FILES):
+            continue  # membership / master-members workbooks are not class or social attendance
         rel = path.relative_to(output_root).as_posix()
-        if rel.startswith('2022'):
-            continue  # 2022 predates the supported layouts; skip wholesale
         wb = openpyxl.load_workbook(path, data_only=False)
         term, year, anchor = _term_from(path), _resolve_year(wb), _week_anchor(wb)
         for ws in wb.worksheets:
