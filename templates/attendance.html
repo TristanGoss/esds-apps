@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Attendance</title>
+    <link rel="icon" href="/public/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="/public/css/site.css">
+    <!-- Plotly does all the rendering, zoom/pan, hover and click client-side. Pinned major version. -->
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+</head>
+
+<body>
+    {% include "membership_navbar.html" %}
+    <main class="container">
+        <h1>Attendance over time</h1>
+        <p>
+            Every activity (an individual lesson or social) we hold a record for is one point below:
+            its date against the number of people. This is a high-detail view intended for debugging.
+            Drag to zoom, double-click to reset, hover a point for a summary, and click a point to
+            pin its full breakdown beneath the chart. Simpler per-term summaries will follow;
+            this one stays deliberately busy so software bugs are immediately obvious.
+        </p>
+        <p><strong>Reading the chart.</strong>
+            <em>Colour</em> is the event type (course, social, workshop, weekender).
+            <em>Marker shape</em> is the difficulty (Level 1/2/3, beginners, intermediate,
+            advanced; a cross for socials, a circle where the level is unknown).
+            <em>Filled</em> markers are confirmed attendance (named attendees marked present plus
+            anonymous door head-counts); <em>hollow</em> markers are everyone registered, whether or
+            not we know they turned up.
+        </p>
+
+        <div id="chart-status"></div>
+        <div id="attendance-chart" style="width:100%;height:560px;"></div>
+
+        <article id="point-details" hidden>
+            <header><strong>Selected activity</strong></header>
+            <div id="point-details-body"></div>
+        </article>
+
+        <h2>Frequently asked questions</h2>
+
+        <details>
+            <summary>What's the difference between "registered" and "attended"?</summary>
+            <p>
+                <strong>Registered</strong> counts everyone named on the sheet for that activity —
+                whether or not we know they turned up. <strong>Attended</strong> counts only people
+                we have a positive record were present, plus anonymous head-counts (see below). They
+                are different measures, so the two markers for one night rarely line up exactly.
+            </p>
+        </details>
+
+        <details>
+            <summary>What is an anonymous head-count?</summary>
+            <p>
+                Most points combine <em>named</em> records (one pseudonym per person)
+                with <em>aggregate</em> head-counts: anonymous people in the room — typically door or
+                cash sales taken without recording a name. The attended (filled) figure is named
+                attendees plus these aggregate heads; the registered (hollow) figure is named only.
+            </p>
+        </details>
+
+        <details>
+            <summary>How can a night show more attended than registered?</summary>
+            <p>
+                "Registered" only counts people for whom we have a name. We have sometimes sold
+                tickets on the door without recording names, and those door sales show up in the
+                attended head-count without a matching registration.
+            </p>
+        </details>
+
+        <details>
+            <summary>Are these the true numbers in the room?</summary>
+            <p>
+                No — they run low. We don't routinely log volunteer or committee attendance, so the
+                actual number of people present on a given night is typically 5-10 higher than shown.
+            </p>
+        </details>
+
+        <details>
+            <summary>Why is Level 2 attendance for some terms in 2026 surprisingly high?</summary>
+            <p>
+                Anyone who turned up to even a single night of a Level 2 term in 2026 is counted as
+                registered for the whole term, so the registered figure reflects everyone who passed
+                through (as if they had bought a block and then turned up on only some nights), not a
+                stable weekly cohort.
+            </p>
+        </details>
+
+        <details>
+            <summary>Why do the 2026 Level 2 registered numbers jump around?</summary>
+            <p>
+                Those sheets record a single ticket category per person per night, and social-only
+                attendees are separated out from the Level 2 count rather than added to it — so the
+                Level 2 line moves as people switch between dancing the lesson and coming for the
+                social only. Note that the "social only" figure is not a separate, sparsely-attended
+                social event: it's the people on a Level 2 class night who came for the social
+                portion of that same evening rather than the lesson, so small social-only numbers
+                sitting alongside a class are expected, not a poorly-attended party.
+            </p>
+        </details>
+
+        <details>
+            <summary>Why does a weekender show the same attendance on more than one day?</summary>
+            <p>
+                A weekender (and the Stockbridge Swingout) sells one ticket covering classes that run
+                across several days. We treat checking in at any point as attending every class that
+                ticket entitles you to, so a single class track appears on each of its days with the
+                same people. This is a deliberate modelling choice: it keeps weekender figures
+                comparable and reflects that almost nobody is checked in separately after the first day.
+            </p>
+        </details>
+
+        <details>
+            <summary>Why does the 2023 Christmas Party show only one attendee?</summary>
+            <p>
+                That event survives only as a ticket-booking export, not an attendance register. We
+                have a note of one person paying on the door (counted as attended), but no record of
+                who else turned up, so everyone else's attendance is marked "unknown" rather than
+                present.
+            </p>
+        </details>
+
+        <details>
+            <summary>Why is there Level 2 registration data for early 2022 and then nothing?</summary>
+            <p>
+                It appears that Level 2 classes were sold as a block in early 2022. The early-2022
+                course was tracked with a hand-kept class-list register that recorded the full room,
+                including door and cash payers. From spring 2022 onward the only surviving records
+                are dancecloud booking exports, which captured just the people who bought a block
+                ticket online (a handful per course at the time) and then the practice of selling
+                Level 2 blocks appears to have ended. So the drop-off is a change in record-keeping,
+                not a real collapse in attendance.
+            </p>
+        </details>
+    </main>
+
+    <script src="/public/js/attendance.js"></script>
+</body>
+
+</html>

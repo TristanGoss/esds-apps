@@ -3,12 +3,14 @@ import csv
 import io
 import logging
 import re
+import sqlite3
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import asdict
 from datetime import datetime, timedelta
 from http import HTTPStatus
 from io import BytesIO
+from pathlib import Path
 from typing import List
 from urllib.parse import urlparse
 
@@ -17,7 +19,7 @@ import pytz
 import segno
 from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, RedirectResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from esds_apps import config
@@ -67,6 +69,43 @@ def _is_safe_url(url: str) -> bool:
         return False
 
 
+def _attendance_activity_rows() -> list[dict]:
+    """Read the per-activity attendance summary from the offline attendance database.
+
+    One row per activity: its date, the event and activity it belongs to, and the headcounts
+    the /attendance scatter plots. Read-only — only SELECTs run here — so it never disturbs the
+    database the notebook rebuilds. Raises FileNotFoundError if that database hasn't been built.
+    """
+    if not Path(config.ATTENDANCE_DB_PATH).exists():
+        raise FileNotFoundError(config.ATTENDANCE_DB_PATH)
+
+    conn = sqlite3.connect(config.ATTENDANCE_DB_PATH)
+    try:
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT av.date,
+                   e.name   AS event_name,
+                   av.event_type,
+                   act.name AS activity_name,
+                   av.activity_type,
+                   av.difficulty,
+                   av.named_total,
+                   av.aggregate_total,
+                   av.total,
+                   av.named_unknown,
+                   av.named_registered
+            FROM activity_attendance av
+            JOIN event e    ON e.event_id      = av.event_id
+            JOIN activity act ON act.activity_id = av.activity_id
+            ORDER BY av.date
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
 @asynccontextmanager
 async def lifespan_manager(_: FastAPI):
     """Create an async task that periodically issues unissued cards."""
@@ -105,6 +144,29 @@ async def internal_server_error_handler(request: Request, exc: Exception):
 @app.get('/', response_class=HTMLResponse)
 async def landing_page(request: Request):
     return config.TEMPLATES.TemplateResponse(request, 'landing.html')
+
+
+@app.get('/attendance', response_class=HTMLResponse)
+@login_required
+async def attendance_overview(request: Request):
+    return config.TEMPLATES.TemplateResponse(request, 'attendance.html')
+
+
+@app.get('/attendance/activities.json')
+async def attendance_activities(request: Request, _: None = Depends(require_valid_cookie)):
+    """Serve the all-activities scatter data as JSON for the client-side Plotly chart.
+
+    Guarded by the cookie dependency (not the redirecting login_required) so an unauthenticated
+    fetch gets a clean 401 rather than a 302 into Google's OAuth flow.
+    """
+    try:
+        return JSONResponse({'activities': _attendance_activity_rows()})
+    except FileNotFoundError:
+        log.warning('Attendance database not found at %s', config.ATTENDANCE_DB_PATH)
+        return JSONResponse(
+            {'error': 'The attendance database has not been built yet.'},
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
 
 
 @app.api_route('/health', methods=['GET', 'HEAD'])

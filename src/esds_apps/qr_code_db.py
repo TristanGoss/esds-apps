@@ -9,7 +9,7 @@ SCHEMA_PATH = os.path.join(os.path.dirname(__file__), 'qr_codes_schema.sql')
 
 
 class QRCodeDB:
-    def __init__(self, db_path: Optional[str] = config.DB_PATH):
+    def __init__(self, db_path: Optional[str] = config.QR_DB_PATH):
         self.db_path = db_path
         self._ensure_schema()
 

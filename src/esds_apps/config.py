@@ -1,4 +1,5 @@
 import logging
+import os
 from pathlib import Path
 
 from dotenv import dotenv_values
@@ -8,7 +9,8 @@ LOGGING_LEVEL = logging.DEBUG
 
 CACHE_ROOT = '/tmp/esds_cache'
 BASE_URL = 'https://apps.esds.org.uk'
-DB_PATH = CACHE_ROOT + '/qr_codes.db'
+QR_DB_PATH = CACHE_ROOT + '/qr_codes.db'
+ATTENDANCE_DB_PATH = Path(os.environ.get('ATTENDANCE_DB_PATH', CACHE_ROOT + '/attendance.sqlite'))
 
 SECRETS = dotenv_values('.env')
 for var_name in [
