@@ -12,6 +12,9 @@ from .workbooks import (
     _booking_list_ws,
     _booking_summary_ws,
     _booking_ws_on,
+    _checked_in_by_activity_ws,
+    _checked_in_multiday_class_ws,
+    _checked_in_no_scans_ws,
     _class_list_roster_ws,
     _count_grid_undated_ws,
     _count_grid_ws,
@@ -22,6 +25,7 @@ from .workbooks import (
     _roster_weekly_ws,
     _roster_ws,
     _social_register_ws,
+    _swingout_ws,
     _tally_ws,
     _teachers_choice_tally_ws,
 )
@@ -163,6 +167,65 @@ def test_booking_status(status, present, expected):
     assert parsers._booking_status(status, present) == expected
 
 
+@pytest.mark.parametrize(
+    ('value', 'expected'),
+    [
+        (datetime(2026, 5, 10, 14, 3), True),  # a check-in timestamp
+        ('Yes', True),  # the pivoted 'Check-Ins' tab's marker
+        ('No', False),
+        ('n/a', False),  # activity not on the ticket
+        ('na', False),
+        ('False', False),
+        ('', False),
+        ('   ', False),
+        (None, False),
+    ],
+)
+def test_is_checked_in(value, expected):
+    assert parsers._is_checked_in(value) is expected
+
+
+@pytest.mark.parametrize(
+    ('checkin', 'status', 'sheet_has_checkins', 'expected'),
+    [
+        (datetime(2026, 5, 10), 'Confirmed', True, 'attended'),  # scanned in
+        (None, 'Confirmed', True, 'absent'),  # blank but the scanner ran -> no-show
+        (None, 'Confirmed', False, 'unknown'),  # scanner never ran -> uncaptured
+        (datetime(2026, 5, 10), 'Cancelled', True, 'absent'),  # cancelled beats a stray check-in
+        (None, 'Cancelled', False, 'absent'),  # cancelled is absent regardless
+    ],
+)
+def test_checkin_status(checkin, status, sheet_has_checkins, expected):
+    assert parsers._checkin_status(checkin, status, sheet_has_checkins) == expected
+
+
+@pytest.mark.parametrize(
+    ('label', 'expected'),
+    [
+        ('Friday Welcome Party', 'social'),
+        ('30th Birthday Ball', 'social'),
+        ("Tea dance with Dick Lee's Hot Club Hepcats", 'social'),
+        ('Collegiate Shag Workshop', 'lesson'),
+        ('Track A - Classes', 'lesson'),
+        ('Lindy Technique', 'lesson'),
+        ('Something unclassifiable', 'lesson'),  # falls back to the event-type default (workshop -> lesson)
+    ],
+)
+def test_activity_type_from_name(label, expected):
+    assert str(parsers._activity_type_from_name(label, parsers.EventType.WORKSHOP)) == expected
+
+
+def test_dancecloud_event_name_strips_trailing_date_and_suffixes_year():
+    """The export's date tail is dropped so recurring fixtures collapse to one year-tagged event."""
+    assert parsers._dancecloud_event_name("Teachers' Workshop Attendees Apr 19th 2026", 2026) == (
+        "Teachers' Workshop (2026)"
+    )
+    assert parsers._dancecloud_event_name('30 Years of ESDS March 20th-22nd 2026', 2026) == '30 Years of ESDS (2026)'
+    assert parsers._dancecloud_event_name('Stroll Workshop and Tea Dance June 7th 2026', None) == (
+        'Stroll Workshop and Tea Dance'
+    )
+
+
 def test_course_window_spans_session_months():
     """A course window is a single month or a Mmm-Mmm span over the session dates, year-suffixed."""
     assert parsers._course_window([datetime(2022, 6, 16), datetime(2022, 7, 21)], 2022) == 'Jun-Jul 2022'
@@ -260,6 +323,15 @@ def test_booking_export_matches_only_dated_or_present_status_lists():
     assert p.matches(_booking_list_ws())  # single-event list with a present-note column
     assert not p.matches(_booking_summary_ws())  # Status but no Date and no present -> not claimed
     assert not p.matches(_roster_ws())  # an attendance roster has no booking Status column
+    assert not p.matches(_checked_in_by_activity_ws())  # 'Checked In' -> stands aside for the modern parser
+
+
+def test_dancecloud_activity_matches_only_the_checked_in_export():
+    p = parsers.DancecloudActivityParser()
+    assert p.matches(_checked_in_by_activity_ws())  # has dancer_id + Activity + Date + Checked In
+    assert p.matches(_checked_in_no_scans_ws())  # an all-blank Checked In column still identifies the layout
+    assert not p.matches(_booking_by_activity_ws())  # older export: no Checked In column
+    assert not p.matches(_roster_ws())
 
 
 # ---- roster parsing ----
@@ -694,3 +766,133 @@ def test_booking_export_single_event_is_mostly_unknown(db):
     assert db.conn.execute(
         'SELECT named_total, named_unknown, named_registered FROM activity_attendance'
     ).fetchone() == (1, 2, 5)
+
+
+# ---- modern dancecloud (Checked In) export parsing ----
+
+
+def test_dancecloud_activity_splits_paired_ticket_and_reads_check_ins(db):
+    """A combined workshop+tea-dance ticket splits into a lesson and a social; check-ins set turnout."""
+    parsers.DancecloudActivityParser().parse(
+        _checked_in_by_activity_ws(),
+        db,
+        term='Workshop and Tea Dance Attendees May 10th 2026',
+        year=2026,
+        ingest_id=None,
+    )
+    # the event is named from the filename (date tail stripped, year suffixed), classified a workshop
+    assert db.conn.execute('SELECT name, event_type FROM event').fetchone() == (
+        'Workshop and Tea Dance (2026)',
+        'workshop',
+    )
+    # one ticket, two activities on the same date: a lesson (the workshop) and a social (the tea dance)
+    acts = db.conn.execute('SELECT name, activity_type, difficulty, date FROM activity ORDER BY name').fetchall()
+    assert acts == [
+        ('Collegiate Shag Workshop', 'lesson', None, '2026-05-10'),
+        ('Tea Dance', 'social', 'social', '2026-05-10'),
+    ]
+    rows = db.conn.execute(
+        'SELECT a.name, at.dancer_id, at.status FROM attendance at JOIN activity a USING(activity_id) '
+        'ORDER BY a.name, at.dancer_id'
+    ).fetchall()
+    assert rows == [
+        ('Collegiate Shag Workshop', 'DNC-1', 'attended'),  # scanned in
+        ('Collegiate Shag Workshop', 'DNC-2', 'absent'),  # confirmed, no scan
+        ('Collegiate Shag Workshop', 'DNC-3', 'absent'),  # cancelled
+        ('Tea Dance', 'DNC-1', 'absent'),
+        ('Tea Dance', 'DNC-2', 'attended'),
+    ]
+    # DNC-1's two scanned-in workshop tickets -> one named row + one anonymous extra head
+    assert db.conn.execute(
+        'SELECT a.name, ac.head_count FROM attendance_count ac JOIN activity a USING(activity_id)'
+    ).fetchall() == [('Collegiate Shag Workshop', 1)]
+
+
+def test_dancecloud_activity_unknown_when_scanner_never_ran(db):
+    """An export with an entirely blank Checked In column records UNKNOWN, not a sheet-wide no-show."""
+    parsers.DancecloudActivityParser().parse(
+        _checked_in_no_scans_ws(), db, term="Teachers' Workshop Attendees Jan 17th 2026", year=2026, ingest_id=None
+    )
+    assert db.conn.execute('SELECT name, event_type FROM event').fetchone() == ("Teachers' Workshop (2026)", 'workshop')
+    rows = dict(db.conn.execute('SELECT dancer_id, status FROM attendance').fetchall())
+    assert rows == {'DNC-1': 'unknown', 'DNC-2': 'unknown'}  # DNC-1's two tickets collapse to one row
+    # no check-in anywhere -> no attended rows, so no anonymous extra heads from the duplicate ticket
+    assert db.conn.execute('SELECT COUNT(*) FROM attendance_count').fetchone() == (0,)
+
+
+def test_dancecloud_activity_propagates_class_checkin_across_its_days(db):
+    """A check-in to any day of a multi-day class implies attendance every day; socials stay per-night."""
+    parsers.DancecloudActivityParser().parse(
+        _checked_in_multiday_class_ws(),
+        db,
+        term='Big Weekender Attendees March 21st-22nd 2026',
+        year=2026,
+        ingest_id=None,
+    )
+    rows = db.conn.execute(
+        'SELECT a.name, a.date, at.dancer_id, at.status FROM attendance at JOIN activity a USING(activity_id) '
+        'ORDER BY a.name, a.date, at.dancer_id'
+    ).fetchall()
+    assert rows == [
+        ('Evening Social', '2026-03-21', 'DNC-1', 'attended'),  # social scanned
+        ('Evening Social', '2026-03-22', 'DNC-1', 'absent'),  # social NOT propagated -> stays absent
+        ('Track A - Classes', '2026-03-21', 'DNC-1', 'attended'),  # scanned day 1
+        ('Track A - Classes', '2026-03-21', 'DNC-2', 'attended'),  # lifted from day-2 scan
+        ('Track A - Classes', '2026-03-21', 'DNC-3', 'absent'),  # never scanned the class
+        ('Track A - Classes', '2026-03-22', 'DNC-1', 'attended'),  # lifted from day-1 scan
+        ('Track A - Classes', '2026-03-22', 'DNC-2', 'attended'),  # scanned day 2
+        ('Track A - Classes', '2026-03-22', 'DNC-3', 'absent'),
+    ]
+
+
+# ---- Stockbridge Swingout (event-specific) parsing ----
+
+
+def test_stockbridge_matches_only_its_own_tab():
+    """The Stockbridge parser claims a 'swingout' tab with Ticket Type + Registered, nothing else.
+
+    It must be tried before the roster parser (which also matches the dated Registered column);
+    PARSERS order guarantees it wins the dispatch.
+    """
+    assert parsers.StockbridgeSwingoutParser().matches(_swingout_ws())
+    assert not parsers.StockbridgeSwingoutParser().matches(_roster_ws())  # no swingout title / Ticket Type
+    order = [type(p) for p in parsers.PARSERS]
+    assert order.index(parsers.StockbridgeSwingoutParser) < order.index(parsers.RosterParser)
+
+
+def test_stockbridge_expands_each_ticket_into_its_weekend_activities(db):
+    """Each ticket grants a fixed all-or-none set of activities, with Registered as the status."""
+    parsers.StockbridgeSwingoutParser().parse(_swingout_ws(), db, term='Sept-Oct 2025', year=2025, ingest_id=None)
+    assert db.conn.execute('SELECT name, event_type FROM event').fetchone() == (
+        'Sept-Oct 2025: Stockbridge Swingout',
+        'weekender',
+    )
+    # a Full Pass track is two lessons, one each day; a Saturday Only ticket grants only the Saturday
+    # one. The Friday social is the day before; the Sunday class is the day after.
+    acts = db.conn.execute('SELECT name, activity_type, difficulty, date FROM activity ORDER BY date, name').fetchall()
+    assert acts == [
+        ('Friday Social', 'social', 'social', '2025-10-17'),
+        ('Improvers / Intermediate Classes', 'lesson', 'Improvers / Intermediate', '2025-10-18'),
+        ('Intermediate / Advanced Classes', 'lesson', 'Intermediate / Advanced', '2025-10-18'),
+        ('Saturday Social', 'social', 'social', '2025-10-18'),
+        ('Improvers / Intermediate Classes', 'lesson', 'Improvers / Intermediate', '2025-10-19'),
+    ]
+    rows = db.conn.execute(
+        'SELECT a.name, a.date, at.dancer_id, at.status FROM attendance at JOIN activity a USING(activity_id) '
+        'ORDER BY a.name, a.date, at.dancer_id'
+    ).fetchall()
+    assert rows == [
+        ('Friday Social', '2025-10-17', 'DNC-1', 'attended'),  # via Full Pass
+        ('Friday Social', '2025-10-17', 'DNC-4', 'absent'),  # Friday Social Only, no-show
+        # DNC-1's Full Pass puts them in the Imp/Int track on both Saturday and Sunday
+        ('Improvers / Intermediate Classes', '2025-10-18', 'DNC-1', 'attended'),
+        ('Improvers / Intermediate Classes', '2025-10-19', 'DNC-1', 'attended'),
+        ('Intermediate / Advanced Classes', '2025-10-18', 'DNC-2', 'attended'),  # Saturday Only, no Sunday row
+        ('Saturday Social', '2025-10-18', 'DNC-1', 'attended'),
+        ('Saturday Social', '2025-10-18', 'DNC-2', 'attended'),
+        ('Saturday Social', '2025-10-18', 'DNC-3', 'attended'),
+    ]
+    # DNC-1 and DNC-3 each hold a second Saturday-social-granting ticket, both scanned -> two extra heads
+    assert db.conn.execute(
+        'SELECT a.name, ac.head_count FROM attendance_count ac JOIN activity a USING(activity_id)'
+    ).fetchall() == [('Saturday Social', 2)]

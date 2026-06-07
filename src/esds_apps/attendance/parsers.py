@@ -137,6 +137,39 @@ def _booking_status(status_value, present_value=None) -> AttendanceStatus:
     return AttendanceStatus.UNKNOWN
 
 
+def _is_checked_in(value) -> bool:
+    """True if a 'Checked In' cell records a door check-in.
+
+    On the modern dancecloud 'Attendees By Activity' tab this cell is a check-in *timestamp*
+    when the dancer was scanned in and blank when they were not; the pivoted 'Check-Ins' tab
+    instead uses 'Yes'/'No'/'n/a'. Any timestamp or 'Yes' counts as present; a blank, 'No', or
+    'n/a' (the activity was not on their ticket) counts as not-present.
+    """
+    if isinstance(value, datetime):
+        return True
+    if isinstance(value, str):
+        s = value.strip().lower()
+        return bool(s) and s not in ('no', 'n/a', 'na', 'false')
+    return False
+
+
+def _checkin_status(checkin_value, status_value, sheet_has_checkins: bool) -> AttendanceStatus:
+    """Attendance status for one modern dancecloud booking row from its check-in and booking Status.
+
+    A 'Cancelled' booking is ABSENT (the dancer pulled out). Otherwise a recorded check-in is
+    ATTENDED. A blank check-in is ABSENT when the door scanner ran at all on the sheet (someone,
+    somewhere, is checked in) but UNKNOWN when no row carries a check-in — an event whose turnout
+    was never scanned, where a blank means 'uncaptured', not 'no-show'. Mirrors the roster's
+    column-marked rule.
+    """
+    status = status_value.strip().lower() if isinstance(status_value, str) else ''
+    if status.startswith('cancel'):
+        return AttendanceStatus.ABSENT
+    if _is_checked_in(checkin_value):
+        return AttendanceStatus.ATTENDED
+    return AttendanceStatus.ABSENT if sheet_has_checkins else AttendanceStatus.UNKNOWN
+
+
 def _is_attendance_marker(value) -> bool:
     """True if a cell value is a yes/no attendance marker (not a free-text category)."""
     if isinstance(value, bool):
@@ -230,6 +263,29 @@ def _activity_type_for(label: str, event_type: EventType) -> ActivityType:
     return ActivityType.SOCIAL if 'social' in label.lower() else ActivityType.LESSON
 
 
+# Free-text activity-label vocabulary for the modern dancecloud export, whose labels are full
+# names ('30th Birthday Ball', 'Friday Welcome Party', "Tea dance with ...", 'Track A - Classes',
+# 'Collegiate Shag Workshop'). The bare 'social' substring test in _activity_type_for is too weak
+# for these: a social is recognised by its party/ball/tea-dance words, a lesson by its
+# class/workshop/track words.
+_SOCIAL_NAME_RE = re.compile(r'\b(social|party|ball|tea\s*dance|welcome|dance night)\b', re.IGNORECASE)
+_LESSON_NAME_RE = re.compile(r'\b(class(?:es)?|lesson|workshop|track|technique|taster|practice)\b', re.IGNORECASE)
+
+
+def _activity_type_from_name(label: str, event_type: EventType) -> ActivityType:
+    """Classify a free-text dancecloud activity label as a social or a lesson.
+
+    Reads the label's own words first — a 'Tea Dance'/'... Party'/'... Ball' is a social, a
+    'Workshop'/'Classes'/'Track ...' is a lesson — and falls back to ``_activity_type_for`` (the
+    event-type default) when neither vocabulary matches.
+    """
+    if _SOCIAL_NAME_RE.search(label):
+        return ActivityType.SOCIAL
+    if _LESSON_NAME_RE.search(label):
+        return ActivityType.LESSON
+    return _activity_type_for(label, event_type)
+
+
 def _event_type_for(title: str) -> EventType:
     """Classify an event from keywords in its tab title.
 
@@ -279,6 +335,15 @@ def _difficulty_for(*texts: str | None) -> str | None:
 # ---------------------------------------------------------------------------
 # Roster layout helpers
 # ---------------------------------------------------------------------------
+
+
+def _header_columns(header: tuple) -> dict:
+    """Map each lower-cased header label to its first column index (shared by the table parsers)."""
+    out: dict[str, int] = {}
+    for c, v in enumerate(header):
+        if isinstance(v, str) and v.strip():
+            out.setdefault(v.strip().lower(), c)
+    return out
 
 
 def _roster_header(matrix: list[tuple]) -> tuple[int, int] | None:
@@ -1023,26 +1088,22 @@ class BookingExportParser(Parser):
     name = 'booking_export'
 
     @staticmethod
-    def _columns(header: tuple) -> dict:
-        """Map lower-cased header label -> first column index."""
-        out: dict[str, int] = {}
-        for c, v in enumerate(header):
-            if isinstance(v, str) and v.strip():
-                out.setdefault(v.strip().lower(), c)
-        return out
-
-    @staticmethod
     def _has_dates(matrix: list[tuple], header_row: int, date_col: int) -> bool:
         return any(_parse_dt(row[date_col]) is not None for row in matrix[header_row + 1 :] if date_col < len(row))
 
     def matches(self, ws) -> bool:
-        """True for a dancer_id + booking Status list that is either dated or has a present column."""
+        """True for a dancer_id + booking Status list that is either dated or has a present column.
+
+        A 'Checked In' column means it is the *modern* dancecloud export, which
+        :class:`DancecloudActivityParser` (registered ahead of this one) handles richly, so this
+        parser stands aside from it.
+        """
         matrix = list(ws.iter_rows(values_only=True))
         header = _roster_header(matrix)
         if header is None:
             return False
-        cols = self._columns(matrix[header[0]])
-        if 'dancer_id' not in cols or 'status' not in cols:
+        cols = _header_columns(matrix[header[0]])
+        if 'dancer_id' not in cols or 'status' not in cols or 'checked in' in cols:
             return False
         if 'date' in cols and self._has_dates(matrix, header[0], cols['date']):
             return True
@@ -1060,7 +1121,7 @@ class BookingExportParser(Parser):
         """Ingest one booking export: an activity per session, every row UNKNOWN unless noted."""
         matrix = list(ws.iter_rows(values_only=True))
         header_row, _ = _roster_header(matrix)
-        cols = self._columns(matrix[header_row])
+        cols = _header_columns(matrix[header_row])
 
         event_type = _event_type_for(term)
         fallback_dt = _date_from_title(ws.title) or _date_from_title(term)
@@ -1106,6 +1167,308 @@ class BookingExportParser(Parser):
             if key not in best or rank[status] > rank[best[key][0]]:
                 best[key] = (status, f'{title}!{get_column_letter(did_col + 1)}{r + 1}')
         return best
+
+
+# A trailing date phrase on a modern dancecloud export's filename, in either order and with an
+# optional day range: 'June 7th 2026', 'March 20th-22nd 2026', '14 Dec 2023'. Stripped so the
+# event is named for what it is, not for when one instance of it ran.
+_TITLE_DATE_TAIL_RE = re.compile(
+    r'\s+(?:'
+    r'\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+'  # 14 Dec
+    r'|[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*[-–]\s*\d{1,2}(?:st|nd|rd|th)?)?'  # June 7th / March 20th-22nd
+    r')\s+\d{2,4}\s*$',
+    re.IGNORECASE,
+)
+
+
+def _dancecloud_event_name(term: str, year: int | None) -> str:
+    """Event name for a modern dancecloud export: the event title, date tail stripped, year suffixed.
+
+    The 'Attendees By Activity' tab title is the generic export-view name, useless as an event
+    name, so the event is named from the filename instead. The trailing date is dropped so a
+    recurring fixture (e.g. several "Teachers' Workshop" dates) collapses to one event carrying a
+    dated activity per instance; the year keeps same-named events in different years apart.
+    """
+    base = _TITLE_DATE_TAIL_RE.sub('', _strip_attendance(term)).strip()
+    return f'{base} ({year})' if year else base
+
+
+class DancecloudActivityParser(Parser):
+    """Parse a modern dancecloud 'Attendees By Activity' export (2026-on).
+
+    One row per (dancer, activity) booking, carrying the activity's name and datetime in
+    ``Activity``/``Date`` and a per-row ``Checked In`` timestamp — dancecloud's attendance signal:
+    a timestamp means the dancer was scanned in on the door (ATTENDED), a blank means a confirmed
+    booking that never checked in (ABSENT). A 'Cancelled' booking ``Status`` is ABSENT regardless.
+    Because dancecloud already expands a multi-activity ticket (a weekend 'Full pass', a combined
+    'Workshop and Tea Dance' ticket) into one row per activity, each activity is ingested in its
+    own right — splitting e.g. a workshop and its tea dance into two activities, each classified
+    from its own name — so the awkward 'one ticket, several activities' case needs no special
+    handling here.
+
+    Distinguished from the older booking exports (handled by :class:`BookingExportParser`) purely
+    by the ``Checked In`` column, which only the modern export carries; that is also why this
+    parser is registered ahead of it. The sibling 'Attendees' rollup and 'Check-Ins' pivot in the
+    same workbook are the same data and are skipped as redundant by the dispatcher.
+
+    If no row anywhere on the sheet carries a check-in (an event where the door scanner was never
+    used) the column conveys nothing, so every booking is recorded UNKNOWN rather than as a
+    sheet-wide no-show — mirroring the roster's column-marked rule.
+
+    A check-in to *any* day of a class implies attendance at every day it ran: door scanning on the
+    later day of a weekender is patchy, so a dancer scanned into a multi-day class (the same Activity
+    name on more than one date, e.g. a weekender's 'Track A') on one day is taken to have attended it
+    on the others too. This lifts only lessons (a social is per-night) and only an otherwise-ABSENT
+    reading; it mirrors the all-or-none assumption :class:`StockbridgeSwingoutParser` makes from its
+    single Registered flag.
+    """
+
+    name = 'dancecloud_activity'
+
+    def matches(self, ws) -> bool:
+        """True for a dancer_id table carrying Activity, Date and the modern Checked In columns."""
+        matrix = list(ws.iter_rows(values_only=True))
+        header = _roster_header(matrix)
+        if header is None:
+            return False
+        cols = _header_columns(matrix[header[0]])
+        return all(k in cols for k in ('dancer_id', 'activity', 'date', 'checked in'))
+
+    @staticmethod
+    def _sessions(matrix: list[tuple], header_row: int, cols: tuple, title: str) -> dict:
+        """Aggregate each (activity label, date) -> {dancer: [best status, attended-ticket count, cell]}.
+
+        The best status is the most informative across that dancer's tickets for the session; the
+        attended-ticket surplus becomes anonymous extra heads. If no row anywhere carries a check-in
+        (the door scanner never ran) a blank check-in means 'uncaptured' (UNKNOWN), not a no-show.
+        """
+        did_col, act_col, date_col, checkin_col, status_col = cols
+        sheet_has_checkins = any(
+            _is_checked_in(row[checkin_col]) for row in matrix[header_row + 1 :] if checkin_col < len(row)
+        )
+        rank = {AttendanceStatus.UNKNOWN: 0, AttendanceStatus.ABSENT: 1, AttendanceStatus.ATTENDED: 2}
+        sessions: dict[tuple, dict] = {}
+        for r in range(header_row + 1, len(matrix)):
+            row = matrix[r]
+            did = row[did_col] if did_col < len(row) else None
+            if not (isinstance(did, str) and did.startswith('DNC-')):
+                continue
+            dt = _parse_dt(row[date_col]) if date_col < len(row) else None
+            label = row[act_col] if act_col < len(row) else None
+            if dt is None or not (isinstance(label, str) and label.strip()):
+                continue
+            status = _checkin_status(
+                row[checkin_col] if checkin_col < len(row) else None,
+                row[status_col] if status_col is not None and status_col < len(row) else None,
+                sheet_has_checkins,
+            )
+            acc = sessions.setdefault((label.strip(), dt), {}).setdefault(did, [AttendanceStatus.UNKNOWN, 0, None])
+            if rank[status] >= rank[acc[0]]:
+                acc[0], acc[2] = status, f'{title}!{get_column_letter(did_col + 1)}{r + 1}'
+            if status == AttendanceStatus.ATTENDED:
+                acc[1] += 1
+        return sessions
+
+    @staticmethod
+    def _attended_lessons(sessions: dict, event_type: EventType) -> dict:
+        """Per dancer, the set of lesson labels they were scanned into on some day (for propagation)."""
+        attended_lessons: dict[str, set] = defaultdict(set)
+        for (label, _), per in sessions.items():
+            if _activity_type_from_name(label, event_type) != ActivityType.LESSON:
+                continue
+            for did, (status, _, _) in per.items():
+                if status == AttendanceStatus.ATTENDED:
+                    attended_lessons[did].add(label)
+        return attended_lessons
+
+    def parse(
+        self,
+        ws,
+        db: AttendanceDb,
+        term: str,
+        year: int | None,
+        ingest_id: int | None,
+        week_anchor: datetime | None = None,
+    ) -> None:
+        """Ingest one modern export: an activity per (label, date), attendance from the check-ins."""
+        matrix = list(ws.iter_rows(values_only=True))
+        header_row, _ = _roster_header(matrix)
+        cols = _header_columns(matrix[header_row])
+        did_col, act_col, date_col = cols['dancer_id'], cols['activity'], cols['date']
+        checkin_col, status_col = cols['checked in'], cols.get('status')
+
+        event_type = _event_type_for(term)
+        event_id = db.upsert_event(_dancecloud_event_name(term, year), event_type)
+
+        sessions = self._sessions(matrix, header_row, (did_col, act_col, date_col, checkin_col, status_col), ws.title)
+        attended_lessons = self._attended_lessons(sessions, event_type)
+
+        for (label, dt), per in sessions.items():
+            activity_type = _activity_type_from_name(label, event_type)
+            difficulty = 'social' if activity_type == ActivityType.SOCIAL else _difficulty_for(label, term)
+            activity_id = db.upsert_activity(event_id, label, dt, activity_type, difficulty)
+            is_lesson = activity_type == ActivityType.LESSON
+            anonymous_extra = 0
+            for did, (status, attended, cell) in per.items():
+                if is_lesson and status == AttendanceStatus.ABSENT and label in attended_lessons[did]:
+                    status = AttendanceStatus.ATTENDED  # scanned into this class on another day
+                db.record_attendance(activity_id, did, status=status, ingest_id=ingest_id, source_cell=cell)
+                anonymous_extra += max(attended - 1, 0)  # un-renamed duplicate tickets → anonymous heads
+            if anonymous_extra:
+                db.record_count(activity_id, None, anonymous_extra, ingest_id=ingest_id, source_cell=ws.title)
+
+
+# ---------------------------------------------------------------------------
+# Stockbridge Swingout weekend (one-off, event-specific)
+# ---------------------------------------------------------------------------
+
+
+class StockbridgeSwingoutParser(Parser):
+    """Parse the Stockbridge Swingout weekend register — the one frankly event-specific parser.
+
+    There is exactly one Stockbridge Swingout in the tree (Sept-Oct 2025), and its ``Ticket
+    Type`` strings are the only per-activity signal, so the ticket -> activity mapping is
+    hand-encoded here rather than derived from the layout. Every other parser keys on a layout;
+    this one keys on an event, justified because the ticket vocabulary is unique to it.
+
+    Layout: one row per booking with a ``Ticket Type`` string and a boolean ``Registered`` — the
+    door attendance marker (True = turned up, False = no-show). A multi-activity ticket grants a
+    fixed set of weekend activities (all-or-none), so each booking is expanded into one attendance
+    row per granted activity carrying its Registered status. The dated ``Registered`` header sits
+    under the Saturday date; the Friday social is the day before.
+
+    The levelled classes (Improvers/Intermediate, Intermediate/Advanced) ran as one track across
+    Saturday *and* Sunday, so a Full Pass holder's classes are recorded as two activities, one per
+    day (a Saturday Only ticket grants only the Saturday class). This matches how the 30th's
+    weekender classes are split per day; and because the single ``Registered`` flag stands in for a
+    check-in, a registered Full Pass holder is recorded ATTENDED on both days — the same assumption
+    :class:`DancecloudActivityParser` makes for the 30th (a check-in to any day of a class implies
+    attendance at every day of it). Counts are ticket-grant counts under the all-or-none assumption,
+    deliberately higher than the door headcounts noted in free text on the sheet, which are not
+    ingested.
+    """
+
+    name = 'stockbridge_swingout'
+
+    def matches(self, ws) -> bool:
+        """True for a Stockbridge Swingout tab: 'swingout' in the title with Ticket Type + Registered."""
+        if 'swingout' not in ws.title.lower() and 'swing out' not in ws.title.lower():
+            return False
+        matrix = list(ws.iter_rows(values_only=True))
+        header = _roster_header(matrix)
+        if header is None:
+            return False
+        cols = _header_columns(matrix[header[0]])
+        return 'ticket type' in cols and 'registered' in cols
+
+    @staticmethod
+    def _grants(ticket: str, friday: datetime, saturday: datetime, sunday: datetime) -> list[tuple]:
+        """Expand one Ticket Type string into the (name, type, difficulty, date) activities it grants.
+
+        A 'Full Pass' grants the Friday social, its levelled track classes on *both* Saturday and
+        Sunday and the Saturday social; a 'Saturday Only' the Saturday class and the Saturday social;
+        the two 'Social Only' tickets their one named social. The level after the ' - ' becomes the
+        class track's difficulty, and the two days of one track share a name (distinguished by date),
+        exactly as the 30th's per-day track activities do.
+        """
+        base, _, level = ticket.partition(' - ')
+        base, level = base.strip().lower(), level.strip()
+        friday_social = ('Friday Social', ActivityType.SOCIAL, 'social', friday)
+        saturday_social = ('Saturday Social', ActivityType.SOCIAL, 'social', saturday)
+        sat_classes = (f'{level} Classes', ActivityType.LESSON, level or None, saturday)
+        sun_classes = (f'{level} Classes', ActivityType.LESSON, level or None, sunday)
+        if base == 'full pass':
+            return [friday_social, sat_classes, sun_classes, saturday_social]
+        if base == 'saturday only':
+            return [sat_classes, saturday_social]
+        if base.startswith('friday social'):
+            return [friday_social]
+        if base.startswith('saturday social'):
+            return [saturday_social]
+        return []
+
+    @staticmethod
+    def _saturday(matrix: list[tuple], header_row: int, reg_col: int) -> datetime | None:
+        """The Saturday date written above the Registered column, else any date cell, else None."""
+        if header_row > 0:
+            above = matrix[header_row - 1]
+            if reg_col < len(above) and (dt := _parse_dt(above[reg_col])):
+                return dt
+        for row in matrix:
+            for value in row:
+                if dt := _parse_dt(value):
+                    return dt
+        return None
+
+    def parse(
+        self,
+        ws,
+        db: AttendanceDb,
+        term: str,
+        year: int | None,
+        ingest_id: int | None,
+        week_anchor: datetime | None = None,
+    ) -> None:
+        """Ingest the Stockbridge weekend: expand each ticket into the activities it granted."""
+        matrix = list(ws.iter_rows(values_only=True))
+        header_row, dancer_col = _roster_header(matrix)
+        cols = _header_columns(matrix[header_row])
+        ticket_col, reg_col = cols['ticket type'], cols['registered']
+
+        saturday = self._saturday(matrix, header_row, reg_col)
+        if saturday is None:
+            return  # no date to anchor the weekend on
+        friday, sunday = saturday - timedelta(days=1), saturday + timedelta(days=1)
+
+        title = ws.title
+        event_type = _event_type_for(title)  # 'swingout' -> WEEKENDER
+        event_id = db.upsert_event(_event_name(term, title, year, event_type), event_type)
+
+        activities: dict[tuple, int] = {}
+
+        def activity_for(name: str, kind: ActivityType, difficulty: str | None, dt: datetime) -> int:
+            key = (name, dt.date())  # a track shares a name across its two days; the date keeps them apart
+            if key not in activities:
+                activities[key] = db.upsert_activity(event_id, name, dt, kind, difficulty)
+            return activities[key]
+
+        cols_ix = (dancer_col, ticket_col, reg_col)
+        per = self._collect(matrix, header_row, cols_ix, (friday, saturday, sunday), title, activity_for)
+        for aid, by_did in per.items():
+            anonymous_extra = 0
+            for did, (status, attended, cell) in by_did.items():
+                db.record_attendance(aid, did, status=status, ingest_id=ingest_id, source_cell=cell)
+                anonymous_extra += max(attended - 1, 0)  # un-renamed duplicate tickets -> anonymous heads
+            if anonymous_extra:
+                db.record_count(aid, None, anonymous_extra, ingest_id=ingest_id, source_cell=title)
+
+    @classmethod
+    def _collect(cls, matrix, header_row, cols_ix, days, title, activity_for) -> dict:
+        """Aggregate, per (activity, dancer): best Registered status, attended-ticket count, a cell.
+
+        The attended-ticket surplus per (activity, dancer) becomes anonymous extra heads, as in the
+        roster layout. ``cols_ix`` is (dancer_col, ticket_col, reg_col); ``days`` is the
+        (friday, saturday, sunday) anchor passed to :meth:`_grants`.
+        """
+        dancer_col, ticket_col, reg_col = cols_ix
+        friday, saturday, sunday = days
+        rank = {AttendanceStatus.UNKNOWN: 0, AttendanceStatus.ABSENT: 1, AttendanceStatus.ATTENDED: 2}
+        per: dict[int, dict[str, list]] = defaultdict(dict)
+        for r in range(header_row + 1, len(matrix)):
+            row = matrix[r]
+            did = row[dancer_col] if dancer_col < len(row) else None
+            ticket = row[ticket_col] if ticket_col < len(row) else None
+            if not (isinstance(did, str) and did.startswith('DNC-')) or not isinstance(ticket, str):
+                continue
+            status = _present_status(_is_true(row[reg_col]) if reg_col < len(row) else False)
+            cell = f'{title}!{get_column_letter(dancer_col + 1)}{r + 1}'
+            for name, kind, difficulty, dt in cls._grants(ticket, friday, saturday, sunday):
+                acc = per[activity_for(name, kind, difficulty, dt)].setdefault(did, [AttendanceStatus.UNKNOWN, 0, None])
+                if rank[status] >= rank[acc[0]]:
+                    acc[0], acc[2] = status, cell
+                if status == AttendanceStatus.ATTENDED:
+                    acc[1] += 1
+        return per
 
 
 # ---------------------------------------------------------------------------
@@ -1230,10 +1593,12 @@ def _activity_name(
 # The registered parsers, in dispatch order. The dispatcher tries each per sheet and uses the
 # first whose ``matches`` returns True.
 PARSERS: list[Parser] = [
+    StockbridgeSwingoutParser(),
     RosterParser(),
     Level2TallyParser(),
     Level2CountGridParser(),
     L2SOAttendanceParser(),
     SocialRegisterParser(),
+    DancecloudActivityParser(),
     BookingExportParser(),
 ]

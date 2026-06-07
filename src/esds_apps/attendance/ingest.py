@@ -105,23 +105,24 @@ _NON_ATTENDANCE_SHEETS = ('readme', 'member', 'mail', 'exceptions', 'loyalty', '
 _NON_ATTENDANCE_FILES = ('membership', 'master members')
 
 
-# A dancecloud export carries both a dated 'Attendees By Activity' view (one row per dancer per
-# session) and a plain 'Attendees' rollup of the same bookings with the per-session dates dropped.
-# When both are present the rollup is wholly contained in the by-activity view, so no parser claims
-# it — but it should be reported as redundant, not as a sheet that "needs a new parser". The rollup
-# is only treated as redundant when its by-activity sibling actually exists: a lone 'Attendees' tab
-# (e.g. the Feb-March classes workbook, which has 'Class List' + 'Attendees' and no by-activity view)
-# is still flagged, because then it may be the only record of those bookings.
+# A dancecloud export carries a dated 'Attendees By Activity' view (one row per dancer per session)
+# alongside two restatements of the same bookings: a plain 'Attendees' rollup with the per-session
+# dates dropped, and (in the modern export) a 'Check-Ins' pivot of the same check-in marks. When the
+# by-activity view is present, both restatements are wholly contained in it, so no parser claims them
+# — but they should be reported as redundant, not as sheets that "need a new parser". They are only
+# treated as redundant when their by-activity sibling actually exists: a lone 'Attendees' tab (e.g.
+# the Feb-March classes workbook, which has 'Class List' + 'Attendees' and no by-activity view) is
+# still flagged, because then it may be the only record of those bookings.
 _BY_ACTIVITY_TITLE = 'attendees by activity'
-_ROLLUP_TITLE = 'attendees'
+_REDUNDANT_WHEN_BY_ACTIVITY = ('attendees', 'check-ins')
 
 
 def _redundant_rollup_titles(wb) -> set[str]:
-    """Titles of plain 'Attendees' rollup sheets made redundant by an 'Attendees By Activity' sibling."""
+    """Titles of 'Attendees'/'Check-Ins' restatements made redundant by an 'Attendees By Activity' sibling."""
     titles = {ws.title.strip().lower() for ws in wb.worksheets}
     if _BY_ACTIVITY_TITLE not in titles:
         return set()
-    return {ws.title for ws in wb.worksheets if ws.title.strip().lower() == _ROLLUP_TITLE}
+    return {ws.title for ws in wb.worksheets if ws.title.strip().lower() in _REDUNDANT_WHEN_BY_ACTIVITY}
 
 
 def ingest_folder(output_root, db: AttendanceDb, parsers: list | None = None) -> IngestReport:

@@ -313,3 +313,107 @@ def _booking_ws_on(month: int, day: int, title='Attendees By Activity'):
     ws['A1'], ws['B1'], ws['C1'], ws['D1'] = 'dancer_id', 'Activity', 'Date', 'Status'
     ws['A2'], ws['B2'], ws['C2'], ws['D2'] = 'DNC-1', 'Lesson', datetime(2023, month, day, 19, 15), 'Confirmed'
     return ws
+
+
+def _checked_in_by_activity_ws(title='Attendees By Activity'):
+    """A modern (2026-on) dancecloud 'Attendees By Activity' export with a 'Checked In' column.
+
+    One ticket combining a workshop and a tea dance is pre-expanded by dancecloud into one row per
+    activity, so the two share a date but must become two activities — a lesson and a social. The
+    'Checked In' cell is a door-scan timestamp (attended) or blank (absent); a 'Cancelled' Status
+    is absent regardless. DNC-1 holds two workshop tickets, both scanned in (an un-renamed extra).
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['A1'], ws['B1'], ws['C1'], ws['D1'], ws['E1'] = 'dancer_id', 'Activity', 'Date', 'Status', 'Checked In'
+    on = datetime(2026, 5, 10, 14, 0)
+    scan = datetime(2026, 5, 10, 14, 3)  # a check-in timestamp
+    rows = [
+        ('DNC-1', 'Collegiate Shag Workshop', on, 'Confirmed', scan),  # attended (lesson)
+        ('DNC-1', 'Tea Dance', on, 'Confirmed', None),  # absent (social, scanner ran)
+        ('DNC-2', 'Collegiate Shag Workshop', on, 'Confirmed', None),  # absent
+        ('DNC-2', 'Tea Dance', on, 'Confirmed', scan),  # attended
+        ('DNC-3', 'Collegiate Shag Workshop', on, 'Cancelled', None),  # cancelled -> absent
+        ('DNC-1', 'Collegiate Shag Workshop', on, 'Confirmed', scan),  # un-renamed extra ticket, scanned
+    ]
+    for i, (did, act, dt, status, checkin) in enumerate(rows, start=2):
+        ws[f'A{i}'], ws[f'B{i}'], ws[f'C{i}'], ws[f'D{i}'] = did, act, dt, status
+        if checkin is not None:
+            ws[f'E{i}'] = checkin
+    return ws
+
+
+def _checked_in_multiday_class_ws(title='Attendees By Activity'):
+    """A weekender export where a class ('Track A') runs on two days, scanned patchily on day 2.
+
+    Used to check that a check-in to any day of a class implies attendance at every day it ran:
+    DNC-1 scanned into Track A on day 1 only, DNC-2 on day 2 only — both should end attended on
+    both days. DNC-3 never scanned Track A — absent both days. The nightly social is *not*
+    propagated: DNC-1 scanned the day-1 social but not the day-2 one, so day 2 stays absent.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['A1'], ws['B1'], ws['C1'], ws['D1'], ws['E1'] = 'dancer_id', 'Activity', 'Date', 'Status', 'Checked In'
+    d1, d2 = datetime(2026, 3, 21, 13, 0), datetime(2026, 3, 22, 13, 0)
+    scan1, scan2 = datetime(2026, 3, 21, 13, 5), datetime(2026, 3, 22, 13, 5)
+    rows = [
+        ('DNC-1', 'Track A - Classes', d1, 'Confirmed', scan1),  # scanned day 1
+        ('DNC-1', 'Track A - Classes', d2, 'Confirmed', None),  # blank day 2 -> lifted to attended
+        ('DNC-2', 'Track A - Classes', d1, 'Confirmed', None),  # blank day 1 -> lifted to attended
+        ('DNC-2', 'Track A - Classes', d2, 'Confirmed', scan2),  # scanned day 2
+        ('DNC-3', 'Track A - Classes', d1, 'Confirmed', None),  # never scanned -> absent both days
+        ('DNC-3', 'Track A - Classes', d2, 'Confirmed', None),
+        ('DNC-1', 'Evening Social', d1, 'Confirmed', scan1),  # social: per-night, not propagated
+        ('DNC-1', 'Evening Social', d2, 'Confirmed', None),  # blank -> stays absent
+    ]
+    for i, (did, act, dt, status, checkin) in enumerate(rows, start=2):
+        ws[f'A{i}'], ws[f'B{i}'], ws[f'C{i}'], ws[f'D{i}'] = did, act, dt, status
+        if checkin is not None:
+            ws[f'E{i}'] = checkin
+    return ws
+
+
+def _swingout_ws(title='Stockbridge Swingout'):
+    """The one-off Stockbridge Swingout register: a Ticket Type string and a boolean Registered.
+
+    The Saturday date sits in the row above the 'Registered' header (the Friday social is the day
+    before). Each ticket grants a fixed set of weekend activities, all-or-none, with Registered as
+    the status. DNC-1 (Full Pass) and DNC-3 (two Saturday-Social-Only tickets) both also grant the
+    Saturday social, so the duplicate scanned tickets become anonymous extra heads; DNC-4's Friday
+    Social Only is a no-show (Registered False).
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['F2'] = datetime(2025, 10, 18)  # the Saturday date, above the Registered header
+    ws['B3'], ws['C3'], ws['D3'], ws['E3'], ws['F3'] = '#', 'dancer_id', 'redacted', 'Ticket Type', 'Registered'
+    rows = [
+        ('DNC-1', 'Full Pass - Improvers / Intermediate', True),  # Friday social + Imp/Int classes + Sat social
+        ('DNC-2', 'Saturday Only - Intermediate / Advanced', True),  # Int/Adv classes + Sat social
+        ('DNC-3', 'Saturday Social Only', True),
+        ('DNC-3', 'Saturday Social Only', True),  # same person, extra ticket -> anonymous Sat-social head
+        ('DNC-4', 'Friday Social Only', False),  # booked the Friday social, no-show
+        ('DNC-1', 'Saturday Social Only', True),  # DNC-1 already in Sat social via Full Pass -> extra head
+    ]
+    for i, (did, ticket, reg) in enumerate(rows, start=4):
+        ws[f'C{i}'], ws[f'E{i}'], ws[f'F{i}'] = did, ticket, reg
+    return ws
+
+
+def _checked_in_no_scans_ws(title='Attendees By Activity'):
+    """A modern export whose door scanner never ran: a 'Checked In' column that is entirely blank.
+
+    Nobody anywhere is checked in, so a blank conveys nothing — every booking is UNKNOWN, not a
+    sheet-wide no-show. DNC-1 holds two tickets for the one session (they collapse to one row).
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['A1'], ws['B1'], ws['C1'], ws['D1'], ws['E1'] = 'dancer_id', 'Activity', 'Date', 'Status', 'Checked In'
+    on = datetime(2026, 1, 17, 13, 0)
+    ws['A2'], ws['B2'], ws['C2'], ws['D2'] = 'DNC-1', "Teachers' Workshop", on, 'Confirmed'
+    ws['A3'], ws['B3'], ws['C3'], ws['D3'] = 'DNC-2', "Teachers' Workshop", on, 'Confirmed'
+    ws['A4'], ws['B4'], ws['C4'], ws['D4'] = 'DNC-1', "Teachers' Workshop", on, 'Confirmed'  # extra ticket
+    return ws

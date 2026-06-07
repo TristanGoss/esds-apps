@@ -5,7 +5,13 @@ import openpyxl
 
 from esds_apps.attendance import ingest
 
-from .workbooks import _booking_by_activity_ws, _booking_summary_ws, _roster_ws
+from .workbooks import (
+    _booking_by_activity_ws,
+    _booking_summary_ws,
+    _checked_in_by_activity_ws,
+    _roster_ws,
+    _swingout_ws,
+)
 
 # ---- workbook-context helpers ----
 
@@ -57,6 +63,20 @@ def test_ingest_folder_dispatches_and_reports_unhandled(tmp_path, db):
     assert any(sheet == 'Sales' for _, sheet in report.unhandled)
     # the roster activities made it into the db via the folder path
     assert db.conn.execute("SELECT COUNT(*) FROM activity WHERE name='Level 1 (2025-05-22)'").fetchone() == (1,)
+
+
+def test_ingest_folder_routes_swingout_to_its_own_parser(tmp_path, db):
+    """The Stockbridge tab is claimed by the event-specific parser, not the roster, in dispatch."""
+    root = tmp_path / 'outputs'
+    root.mkdir()
+    _swingout_ws().parent.save(root / 'Sept-Oct 2025 Attendance_pseudonymised.xlsx')
+
+    report = ingest.ingest_folder(root, db)
+    assert ('Stockbridge Swingout', 'stockbridge_swingout') in {(s, p) for _, s, p in report.handled}
+    # the weekend was expanded into per-activity rows, not one undifferentiated 'Registered' blob
+    names = {r[0] for r in db.conn.execute('SELECT name FROM activity')}
+    assert 'Registered' not in names
+    assert {'Friday Social', 'Saturday Social'} <= names
 
 
 def test_ingest_folder_skips_readme_silently(tmp_path, db):
@@ -126,6 +146,35 @@ def test_ingest_folder_reports_attendees_rollup_as_redundant(tmp_path, db):
     assert ('Level 2 Term B Attendees 2022-11-03_pseudonymised.xlsx', 'Attendees') in report.redundant
     assert all(sheet != 'Attendees' for _, sheet in report.unhandled)
     assert any(p == 'booking_export' for _, _, p in report.handled)
+
+
+def test_ingest_folder_reports_check_ins_pivot_as_redundant(tmp_path, db):
+    """The modern export's 'Check-Ins' pivot and 'Attendees' rollup are both redundant beside by-activity.
+
+    The dated 'Attendees By Activity' (with its Checked In column) is claimed by the dancecloud
+    parser; its two restatements of the same bookings are reported redundant, not as unparsed.
+    """
+    root = tmp_path / 'outputs'
+    root.mkdir()
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    by_act = _checked_in_by_activity_ws('Attendees By Activity')
+    rollup = _booking_summary_ws('Attendees')
+    for src in (by_act, rollup):
+        dst = wb.create_sheet(src.title)
+        for row in src.iter_rows(values_only=True):
+            dst.append(row)
+    pivot = wb.create_sheet('Check-Ins')  # a Yes/No pivot no parser claims
+    pivot.append(['Activity', 'DNC-1', 'DNC-2'])
+    pivot.append(['Collegiate Shag Workshop', 'Yes', 'No'])
+    wb.save(root / 'Workshop and Tea Dance Attendees May 10th 2026_pseudonymised.xlsx')
+
+    report = ingest.ingest_folder(root, db)
+    f = 'Workshop and Tea Dance Attendees May 10th 2026_pseudonymised.xlsx'
+    assert (f, 'Attendees') in report.redundant
+    assert (f, 'Check-Ins') in report.redundant
+    assert report.unhandled == []
+    assert any(p == 'dancecloud_activity' for _, _, p in report.handled)
 
 
 def test_ingest_folder_flags_lone_attendees_rollup(tmp_path, db):
