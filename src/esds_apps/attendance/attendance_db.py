@@ -30,11 +30,17 @@ class ActivityType(StrEnum):
 class TicketType(StrEnum):
     MEMBER = 'member'
     CONCESSION = 'concession'
-    NON_MEMBER = 'non_member'
-    # Many registers only record non-member vs not: a single 'Concession / Member?' flag says
-    # someone is entitled to the member/concession rate (i.e. not a non-member) without saying
+    # The full, undiscounted rate — what the spreadsheets call a 'non-member'. Named 'ordinary'
+    # in the database because it reads more naturally alongside the discounted tiers and isn't
+    # phrased as the absence of something.
+    ORDINARY = 'ordinary'
+    # Many registers only record ordinary vs not: a single 'Concession / Member?' flag says
+    # someone is entitled to the member/concession rate (i.e. not ordinary) without saying
     # which. Use this when member and concession genuinely can't be told apart.
     MEMBER_OR_CONCESSION = 'member_or_concession'
+    # The source recorded *something* about the rate that we can't classify (an unreadable or
+    # contradictory value). Distinct from NULL, which means no ticket information at all.
+    UNKNOWN = 'unknown'
 
 
 # Tables, the unifying view, and the one index that isn't already implied by a
@@ -96,6 +102,16 @@ CREATE TABLE IF NOT EXISTS attendance_count (
     ingest_id   INTEGER REFERENCES ingest_log(ingest_id),
     source_cell TEXT,
     UNIQUE(activity_id, ticket_type)
+);
+
+CREATE TABLE IF NOT EXISTS waitlist (
+    waitlist_id INTEGER PRIMARY KEY,
+    event_id    INTEGER NOT NULL REFERENCES event(event_id),
+    dancer_id   TEXT REFERENCES dancer(dancer_id),
+    head_count  INTEGER NOT NULL,
+    ingest_id   INTEGER REFERENCES ingest_log(ingest_id),
+    source_cell TEXT,
+    UNIQUE(event_id, dancer_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_activity_date ON activity(date);
@@ -273,6 +289,50 @@ class AttendanceDb:
                 'VALUES (?, ?, ?, ?, ?)',
                 (activity_id, tt, head_count, ingest_id, source_cell),
             )
+        self.conn.commit()
+
+    def record_waitlist(
+        self,
+        event_id: int,
+        dancer_id: str | None = None,
+        head_count: int = 1,
+        ingest_id: int | None = None,
+        source_cell: str | None = None,
+    ) -> None:
+        """Upsert a waitlist entry for an event: a named dancer, or an anonymous count.
+
+        Waitlisters wanted a ticket but the event was full; they are not attendees, so they
+        live apart from the attendance tables and never enter attendance or revenue totals.
+        Pass a ``dancer_id`` (head_count defaults to 1) for a named waitlister, or leave it
+        None and pass ``head_count`` for a bare count. Replace semantics make re-ingest
+        idempotent — the anonymous (dancer_id = NULL) row is upserted by hand because SQLite
+        treats NULLs as distinct in a UNIQUE index, so it would never conflict.
+        """
+        if dancer_id is not None:
+            self.ensure_dancer(dancer_id)
+            self.conn.execute(
+                'INSERT INTO waitlist (event_id, dancer_id, head_count, ingest_id, source_cell) '
+                'VALUES (?, ?, ?, ?, ?) '
+                'ON CONFLICT(event_id, dancer_id) DO UPDATE SET '
+                '  head_count = excluded.head_count, ingest_id = excluded.ingest_id, '
+                '  source_cell = excluded.source_cell',
+                (event_id, dancer_id, head_count, ingest_id, source_cell),
+            )
+        else:
+            row = self.conn.execute(
+                'SELECT waitlist_id FROM waitlist WHERE event_id = ? AND dancer_id IS NULL', (event_id,)
+            ).fetchone()
+            if row:
+                self.conn.execute(
+                    'UPDATE waitlist SET head_count = ?, ingest_id = ?, source_cell = ? WHERE waitlist_id = ?',
+                    (head_count, ingest_id, source_cell, row[0]),
+                )
+            else:
+                self.conn.execute(
+                    'INSERT INTO waitlist (event_id, dancer_id, head_count, ingest_id, source_cell) '
+                    'VALUES (?, NULL, ?, ?, ?)',
+                    (event_id, head_count, ingest_id, source_cell),
+                )
         self.conn.commit()
 
     def close(self) -> None:

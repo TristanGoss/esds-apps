@@ -121,6 +121,33 @@ def _l1_attendance_2026_ws(title='2026 L1 Attendance'):
     return ws
 
 
+def _roster_concession_ws(title='Level 1 Attendance'):
+    """A roster carrying a per-dancer 'Concession' flag, captured as a ticket type.
+
+    DNC-1 is 'No' in its first row but blank in a duplicate row -> ordinary (the blank must not
+    overwrite the known value). DNC-4 has an unrecognised value -> unknown. DNC-9 is blank
+    throughout -> NULL (no information).
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['E1'], ws['F1'] = datetime(2025, 5, 22), datetime(2025, 5, 29)  # dates above the header
+    ws['B2'], ws['C2'], ws['D2'], ws['E2'], ws['F2'] = 'dancer_id', 'Concession', 'redacted', 'Week 1', 'Week 2'
+    data = [
+        # (dancer, concession, week1, week2)
+        ('DNC-1', 'No', True, False),
+        ('DNC-2', 'Yes', True, True),
+        ('DNC-4', 'comp', True, False),  # unrecognised -> unknown
+        ('DNC-9', None, True, False),  # blank -> NULL
+        ('DNC-1', None, False, True),  # duplicate ticket; blank concession must not wipe 'No'
+    ]
+    for i, (did, conc, w1, w2) in enumerate(data, start=3):
+        ws[f'B{i}'], ws[f'E{i}'], ws[f'F{i}'] = did, w1, w2
+        if conc is not None:
+            ws[f'C{i}'] = conc
+    return ws
+
+
 def _social_register_ws(title='Online bookings'):
     """A one-off social register: the attendee list in two side-by-side halves.
 
@@ -363,6 +390,56 @@ def test_roster_without_anchor_keeps_only_dated_weeks(db):
     assert db.conn.execute('SELECT name FROM activity').fetchall() == [('Week 1',)]
 
 
+@pytest.mark.parametrize(
+    ('value', 'expected'),
+    [
+        ('Yes', 'member_or_concession'),
+        ('yes', 'member_or_concession'),
+        (True, 'member_or_concession'),
+        ('No', 'ordinary'),
+        (False, 'ordinary'),
+        ('comp', 'unknown'),  # non-empty but unrecognised -> unknown, not NULL
+        ('', None),
+        ('   ', None),
+        (None, None),
+    ],
+)
+def test_concession_ticket_maps_boolean_ish_and_unknown(value, expected):
+    assert ingest._concession_ticket(value) == expected
+
+
+@pytest.mark.parametrize(
+    ('header', 'expected'),
+    [
+        (('dancer_id', 'Concession', 'Week 1'), 1),
+        (('dancer_id', 'Consession', 'Week 1'), 1),  # misspelling seen in Jan-Feb 2026
+        (('dancer_id', 'Concessions', 'Week 1'), 1),  # trailing plural
+        (('dancer_id', 'Ticket Type', 'Week 1'), None),  # not a boolean-ish flag
+        (('dancer_id', 'redacted', 'Week 1'), None),
+    ],
+)
+def test_concession_col_finds_flag_tolerating_misspelling(header, expected):
+    assert ingest._concession_col(header) == expected
+
+
+def test_roster_captures_concession_as_ticket_type(db):
+    """A roster's Concession column maps each dancer into ordinary vs member-or-concession."""
+    ingest.RosterParser().parse(_roster_concession_ws(), db, term='T', year=2025, ingest_id=None)
+    tickets = dict(db.conn.execute('SELECT DISTINCT dancer_id, ticket_type FROM attendance').fetchall())
+    assert tickets == {
+        'DNC-1': 'ordinary',  # 'No'; the blank duplicate row did not overwrite it
+        'DNC-2': 'member_or_concession',  # 'Yes'
+        'DNC-4': 'unknown',  # unrecognised value
+        'DNC-9': None,  # blank throughout -> no information
+    }
+
+
+def test_roster_without_concession_column_leaves_ticket_type_null(db):
+    """The plain roster (no Concession column) records no ticket type."""
+    ingest.RosterParser().parse(_roster_ws(), db, term='T', year=2025, ingest_id=None)
+    assert {r[0] for r in db.conn.execute('SELECT DISTINCT ticket_type FROM attendance')} == {None}
+
+
 def test_roster_social_event_forces_social_activities(db):
     # 'Week 1'/'Week 2' headers contain no 'social', but the event classifies as social,
     # so the activities must still be social — not lesson.
@@ -411,7 +488,7 @@ def test_count_grid_parse_records_counts_and_skips_mean_row(db):
         'SELECT ac.ticket_type, ac.head_count FROM attendance_count ac JOIN activity a USING(activity_id) '
         "WHERE a.name='Level 2 Classes (Week 1)' ORDER BY ac.ticket_type"
     ).fetchall()
-    assert week1 == [('concession', 3), ('member', 16), ('non_member', 8)]
+    assert week1 == [('concession', 3), ('member', 16), ('ordinary', 8)]
 
 
 def test_count_grid_undated_uses_anchor_and_normalises_level(db):
@@ -596,13 +673,13 @@ def test_social_register_parse_reads_both_halves_with_ticket_and_absence(db):
     )
     rows = dict(db.conn.execute('SELECT dancer_id, attended FROM attendance').fetchall())
     assert rows == {'DNC-1': 1, 'DNC-2': 1, 'DNC-3': 1, 'DNC-5': 0}  # DNC-3 (right half) read; DNC-5 absent
-    # Concession Yes -> member_or_concession (not a non-member); No -> non_member.
+    # Concession Yes -> member_or_concession (not ordinary); No -> ordinary.
     tickets = dict(db.conn.execute('SELECT dancer_id, ticket_type FROM attendance').fetchall())
     assert tickets == {
-        'DNC-1': 'non_member',
+        'DNC-1': 'ordinary',
         'DNC-2': 'member_or_concession',
         'DNC-3': 'member_or_concession',
-        'DNC-5': 'non_member',
+        'DNC-5': 'ordinary',
     }
 
 

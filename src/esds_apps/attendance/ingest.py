@@ -35,8 +35,8 @@ from esds_apps.attendance.attendance_db import ActivityType, AttendanceDb, Event
 _TICKET_LABELS = {
     'members': TicketType.MEMBER,
     'concessions': TicketType.CONCESSION,
-    'non-members': TicketType.NON_MEMBER,
-    'non members': TicketType.NON_MEMBER,
+    'non-members': TicketType.ORDINARY,
+    'non members': TicketType.ORDINARY,
 }
 _WEEK_RE = re.compile(r'Week\s*(\d+)\s*\(\s*(\d{1,2})\s+([A-Za-z]+)\)', re.IGNORECASE)
 # A bare 'Week N' label (no '(DD Mon)' suffix): older sheets carry only the week number.
@@ -208,6 +208,18 @@ def _roster_header(matrix: list[tuple]) -> tuple[int, int] | None:
     return None
 
 
+# Tolerant of the 'Consession' misspelling seen in the wild (Jan-Feb 2026) and a trailing plural.
+_CONCESSION_HEADER_RE = re.compile(r'con[cs]essions?', re.IGNORECASE)
+
+
+def _concession_col(header: tuple) -> int | None:
+    """Column index of a roster's boolean-ish 'Concession' flag in its header row, or None."""
+    for c, value in enumerate(header):
+        if isinstance(value, str) and _CONCESSION_HEADER_RE.fullmatch(value.strip()):
+            return c
+    return None
+
+
 def _session_columns(matrix: list[tuple], header_row: int, week_anchor: datetime | None = None) -> list[tuple]:
     """Session columns: a date either in the header row itself or the row directly above it.
 
@@ -281,6 +293,7 @@ class RosterParser:
         matrix = list(ws.iter_rows(values_only=True))
         header_row, dancer_col = _roster_header(matrix)
         sessions = _session_columns(matrix, header_row, week_anchor)
+        ticket_by_did = self._ticket_by_dancer(matrix, header_row, dancer_col, _concession_col(matrix[header_row]))
 
         title = ws.title
         event_type = _event_type_for(title)
@@ -301,10 +314,37 @@ class RosterParser:
             anonymous_extra = 0
             for did, attendeds in attended_by.items():
                 used = sum(attendeds)
-                db.record_attendance(activity_id, did, attended=used >= 1, ingest_id=ingest_id, source_cell=cell)
+                db.record_attendance(
+                    activity_id,
+                    did,
+                    attended=used >= 1,
+                    ticket_type=ticket_by_did.get(did),
+                    ingest_id=ingest_id,
+                    source_cell=cell,
+                )
                 anonymous_extra += max(used - 1, 0)  # un-renamed duplicate tickets → anonymous attendees
             if anonymous_extra:
                 db.record_count(activity_id, None, anonymous_extra, ingest_id=ingest_id, source_cell=cell)
+
+    @staticmethod
+    def _ticket_by_dancer(matrix: list[tuple], header_row: int, dancer_col: int, conc_col: int | None) -> dict:
+        """Map each dancer_id to a ticket type from its (per-dancer, constant) Concession flag.
+
+        Empty if the roster has no Concession column. A dancer repeated across rows (un-renamed
+        extra tickets) takes the first non-blank reading, so a stray blank duplicate row can't
+        wipe a known value.
+        """
+        if conc_col is None:
+            return {}
+        out: dict[str, TicketType | None] = {}
+        for r in range(header_row + 1, len(matrix)):
+            row = matrix[r]
+            did = row[dancer_col] if dancer_col < len(row) else None
+            if not (isinstance(did, str) and did.startswith('DNC-')):
+                continue
+            ticket = _concession_ticket(row[conc_col]) if conc_col < len(row) else None
+            out[did] = out.get(did) or ticket
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -601,20 +641,28 @@ class L2SOAttendanceParser:
 # ---------------------------------------------------------------------------
 
 
+_CONCESSION_YES = {'yes', 'y', 'true', '1'}
+_CONCESSION_NO = {'no', 'n', 'false', '0'}
+
+
 def _concession_ticket(value) -> TicketType | None:
-    """Map a 'Concession' Yes/No cell to a ticket type. Blank is unknown.
+    """Map a boolean-ish 'Concession' cell to a ticket type. Blank means no information (None).
 
     The column records eligibility for the member/concession rate, not membership as such:
-    'Yes' means the attendee is a member or concession (not a non-member) without saying
-    which — hence MEMBER_OR_CONCESSION — and 'No' means a non-member.
+    'Yes' means the attendee is a member or concession (not ordinary) without saying which —
+    hence MEMBER_OR_CONCESSION — and 'No' means they paid the ordinary rate. A non-empty value
+    that is neither yes nor no is UNKNOWN: the source said *something* about the rate that we
+    can't read, which is distinct from a blank cell (no information at all, left as None/NULL).
     """
-    if isinstance(value, str):
-        v = value.strip().lower()
-        if v == 'yes':
-            return TicketType.MEMBER_OR_CONCESSION
-        if v == 'no':
-            return TicketType.NON_MEMBER
-    return None
+    if isinstance(value, bool):
+        return TicketType.MEMBER_OR_CONCESSION if value else TicketType.ORDINARY
+    if not isinstance(value, str) or not (v := value.strip().lower()):
+        return None
+    if v in _CONCESSION_YES:
+        return TicketType.MEMBER_OR_CONCESSION
+    if v in _CONCESSION_NO:
+        return TicketType.ORDINARY
+    return TicketType.UNKNOWN
 
 
 # Header of the per-attendee attendance marker on a one-off register. Different years use

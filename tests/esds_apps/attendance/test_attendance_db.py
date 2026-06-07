@@ -23,7 +23,16 @@ def db(tmp_path):
 
 def test_open_creates_tables_and_view(db):
     names = {r[0] for r in db.conn.execute("SELECT name FROM sqlite_master WHERE type IN ('table','view')")}
-    assert {'event', 'activity', 'attendance', 'attendance_count', 'dancer', 'event_teacher', 'ingest_log'} <= names
+    assert {
+        'event',
+        'activity',
+        'attendance',
+        'attendance_count',
+        'dancer',
+        'event_teacher',
+        'ingest_log',
+        'waitlist',
+    } <= names
     assert 'activity_attendance' in names
 
 
@@ -142,6 +151,47 @@ def test_record_count_distinct_ticket_types_coexist(db):
     db.record_count(act, TicketType.CONCESSION, 2)
     db.record_count(act, None, 1)
     assert db.conn.execute('SELECT COUNT(*) FROM attendance_count WHERE activity_id=?', (act,)).fetchone() == (3,)
+
+
+# ---- waitlist ----
+
+
+def test_record_waitlist_named_is_idempotent(db):
+    eid = db.upsert_event('E', EventType.COURSE)
+    db.record_waitlist(eid, 'DNC-1')
+    db.record_waitlist(eid, 'DNC-1', source_cell='Sheet!A9')  # re-ingest updates, not duplicates
+    rows = db.conn.execute(
+        'SELECT dancer_id, head_count, source_cell FROM waitlist WHERE event_id=?', (eid,)
+    ).fetchall()
+    assert rows == [('DNC-1', 1, 'Sheet!A9')]
+
+
+def test_record_waitlist_count_uses_single_null_row(db):
+    eid = db.upsert_event('E', EventType.COURSE)
+    db.record_waitlist(eid, head_count=12)
+    db.record_waitlist(eid, head_count=8)  # re-ingest replaces the same NULL row
+    rows = db.conn.execute('SELECT dancer_id, head_count FROM waitlist WHERE event_id=?', (eid,)).fetchall()
+    assert rows == [(None, 8)]
+
+
+def test_record_waitlist_named_and_count_coexist_and_sum(db):
+    eid = db.upsert_event('E', EventType.COURSE)
+    db.record_waitlist(eid, 'DNC-1')
+    db.record_waitlist(eid, 'DNC-2')
+    db.record_waitlist(eid, head_count=5)  # plus an anonymous count
+    total = db.conn.execute('SELECT SUM(head_count) FROM waitlist WHERE event_id=?', (eid,)).fetchone()[0]
+    assert total == 7  # noqa: PLR2004
+
+
+def test_record_waitlist_stays_out_of_attendance_totals(db):
+    eid = db.upsert_event('E', EventType.COURSE)
+    act = db.upsert_activity(eid, 'W1', date(2025, 5, 22))
+    db.record_attendance(act, 'DNC-1', attended=True)
+    db.record_waitlist(eid, 'DNC-2')  # waitlisted, not an attendee
+    row = db.conn.execute(
+        'SELECT named_total, aggregate_total, total FROM activity_attendance WHERE activity_id=?', (act,)
+    ).fetchone()
+    assert row == (1, 0, 1)  # the waitlister does not appear
 
 
 # ---- the view ----
