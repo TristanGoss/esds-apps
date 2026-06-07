@@ -761,6 +761,34 @@ def test_pseudonymise_skips_footer_text(tmp_path):
     c.conn.close()
 
 
+def test_pseudonymise_skips_summary_label_rows(tmp_path):
+    """Aggregate rows whose name cell holds a label ('Totals', 'Social Only') are not minted as dancers.
+
+    These labels are pure letters, so _VALID_NAME_RE accepts them; the _NON_NAME_LABELS
+    blocklist is what keeps the L2 register's footer rows from becoming spurious dancers.
+    """
+    p = tmp_path / 'summary.xlsx'
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Sheet1'
+    ws.append(['First Name', 'Last Name', 'Email'])
+    ws.append(['Alice', 'Smith', 'alice@example.com'])
+    ws.append(['', 'Totals', ''])
+    ws.append(['', 'All Attendance', ''])
+    ws.append(['', 'Social Only', ''])
+    wb.save(p)
+    db = tmp_path / 'db.sqlite'
+    result = pseudonymise.pseudonymise(p, db, PASSPHRASE, output_path=tmp_path / 'out.xlsx')
+    rows = result['Sheet1']
+    assert rows[0]['First Name'].startswith('DNC-')
+    for label_row in rows[1:]:
+        assert not label_row['First Name'].startswith('DNC-')
+        assert label_row['Last Name'] != 'redacted'
+    c = pseudonymise.open_db(db, PASSPHRASE)
+    assert len(pseudonymise.decrypt_all(c)) == 1
+    c.conn.close()
+
+
 def test_pseudonymise_manual_column_override(tmp_path):
     p = tmp_path / 'nonstandard.xlsx'
     wb = openpyxl.Workbook()

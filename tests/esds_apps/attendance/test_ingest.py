@@ -354,9 +354,11 @@ def test_count_grid_matches_grid_only():
 def test_roster_parse_creates_event_and_activities(db):
     ingest.RosterParser().parse(_roster_ws(), db, term='May-Jun 2025', year=2025, ingest_id=None)
     ev = db.conn.execute('SELECT name, event_type FROM event').fetchone()
-    assert ev == ('May-Jun 2025: Level 1', 'course')  # 'Attendance' stripped from the name
+    # canonical course event name: 'Attendance' stripped, level folded in, year suffixed
+    assert ev == ('May-Jun 2025 Level 1 (2025)', 'course')
     acts = db.conn.execute('SELECT name, date FROM activity ORDER BY date').fetchall()
-    assert acts == [('Week 1', '2025-05-22'), ('Week 2', '2025-05-29')]
+    # canonical course activity names: level (difficulty) + date, shared across every source
+    assert acts == [('Level 1 (2025-05-22)', '2025-05-22'), ('Level 1 (2025-05-29)', '2025-05-29')]
     # difficulty comes from the sheet title ('Level 1 Attendance') since 'Week N' has none
     assert {r[0] for r in db.conn.execute('SELECT DISTINCT difficulty FROM activity')} == {'Level 1'}
 
@@ -365,10 +367,10 @@ def test_roster_2026_format_with_dates_in_header(db):
     """The 2026 L1 format has dates in the header row, not the row above."""
     ingest.RosterParser().parse(_l1_attendance_2026_ws(), db, term='Jan 2026', year=2026, ingest_id=None)
     ev = db.conn.execute('SELECT name, event_type FROM event').fetchone()
-    assert ev == ('Jan 2026: 2026 L1', 'course')
+    assert ev == ('Jan 2026 Level 1 (2026)', 'course')  # '2026 L1' title yields the 'Level 1' fold
     acts = db.conn.execute('SELECT name, date FROM activity ORDER BY date').fetchall()
-    # Session names come from the header row (C2='Week 1', D2='Week 2'); dates from header row itself
-    assert acts == [('Week 1', '2026-01-15'), ('Week 2', '2026-01-22')]
+    # canonical course activity names from level + date; the header 'Week N' labels are not used
+    assert acts == [('Level 1 (2026-01-15)', '2026-01-15'), ('Level 1 (2026-01-22)', '2026-01-22')]
     # difficulty parsed from the title '2026 L1 Attendance' → 'Level 1'
     assert {r[0] for r in db.conn.execute('SELECT DISTINCT difficulty FROM activity')} == {'Level 1'}
     # Verify the attendance was recorded correctly
@@ -383,7 +385,7 @@ def test_roster_parse_reads_mixed_truthy_markers(db):
     # Week 1: DNC-1 (True), DNC-2 (☑️), DNC-3 ('x') all attended
     rows = db.conn.execute(
         'SELECT dancer_id, status FROM attendance JOIN activity USING(activity_id) '
-        "WHERE name='Week 1' ORDER BY dancer_id"
+        "WHERE name='Level 1 (2025-05-22)' ORDER BY dancer_id"
     ).fetchall()
     assert rows == [('DNC-1', 'attended'), ('DNC-2', 'attended'), ('DNC-3', 'attended')]
 
@@ -392,12 +394,13 @@ def test_roster_parse_duplicate_ticket_becomes_anonymous_count(db):
     ingest.RosterParser().parse(_roster_ws(), db, term='T', year=2025, ingest_id=None)
     # DNC-1 used two tickets in Week 1 → one named row + one anonymous head.
     anon = db.conn.execute(
-        "SELECT ticket_type, head_count FROM attendance_count JOIN activity USING(activity_id) WHERE name='Week 1'"
+        'SELECT ticket_type, head_count FROM attendance_count JOIN activity USING(activity_id) '
+        "WHERE name='Level 1 (2025-05-22)'"
     ).fetchall()
     assert anon == [(None, 1)]
     # Week 2: DNC-1's two tickets, only one used → named attended, no anonymous extra.
     assert db.conn.execute(
-        "SELECT COUNT(*) FROM attendance_count JOIN activity USING(activity_id) WHERE name='Week 2'"
+        "SELECT COUNT(*) FROM attendance_count JOIN activity USING(activity_id) WHERE name='Level 1 (2025-05-29)'"
     ).fetchone() == (0,)
 
 
@@ -405,7 +408,8 @@ def test_roster_refunded_and_false_are_absent(db):
     ingest.RosterParser().parse(_roster_ws(), db, term='T', year=2025, ingest_id=None)
     w2 = dict(
         db.conn.execute(
-            "SELECT dancer_id, status FROM attendance JOIN activity USING(activity_id) WHERE name='Week 2'"
+            'SELECT dancer_id, status FROM attendance JOIN activity USING(activity_id) '
+            "WHERE name='Level 1 (2025-05-29)'"
         ).fetchall()
     )
     assert w2['DNC-2'] == 'absent'  # 'False'
@@ -424,12 +428,14 @@ def test_roster_blank_column_is_unknown_not_absent(db):
     ingest.RosterParser().parse(ws, db, term='T', year=2022, ingest_id=None)
     w1 = dict(
         db.conn.execute(
-            "SELECT dancer_id, status FROM attendance JOIN activity USING(activity_id) WHERE name='Week 1'"
+            'SELECT dancer_id, status FROM attendance JOIN activity USING(activity_id) '
+            "WHERE name='Level 1 (2022-06-16)'"
         ).fetchall()
     )
     w2 = dict(
         db.conn.execute(
-            "SELECT dancer_id, status FROM attendance JOIN activity USING(activity_id) WHERE name='Week 2'"
+            'SELECT dancer_id, status FROM attendance JOIN activity USING(activity_id) '
+            "WHERE name='Level 1 (2022-06-23)'"
         ).fetchall()
     )
     assert w1 == {'DNC-1': 'attended', 'DNC-2': 'absent'}  # a marked column is a real register
@@ -442,13 +448,17 @@ def test_roster_infers_weekly_dates_from_anchor(db):
         _roster_weekly_ws(), db, term='Nov-Dec 2023', year=2023, ingest_id=None, week_anchor=datetime(2023, 11, 9)
     )
     acts = db.conn.execute('SELECT name, date FROM activity ORDER BY date').fetchall()
-    assert acts == [('Week 1', '2023-11-09'), ('Week 2', '2023-11-16'), ('Week 3', '2023-11-23')]
+    assert acts == [
+        ('Level 1 (2023-11-09)', '2023-11-09'),
+        ('Level 1 (2023-11-16)', '2023-11-16'),
+        ('Level 1 (2023-11-23)', '2023-11-23'),
+    ]
 
 
 def test_roster_without_anchor_keeps_only_dated_weeks(db):
     """No anchor: undated 'Week N' columns are dropped rather than guessed."""
     ingest.RosterParser().parse(_roster_weekly_ws(), db, term='Nov-Dec 2023', year=2023, ingest_id=None)
-    assert db.conn.execute('SELECT name FROM activity').fetchall() == [('Week 1',)]
+    assert db.conn.execute('SELECT name FROM activity').fetchall() == [('Level 1 (2023-11-09)',)]
 
 
 @pytest.mark.parametrize(
@@ -521,8 +531,8 @@ def test_tally_parse_counts_ticks_per_ticket_type(db):
         'FROM attendance_count ac JOIN activity a USING(activity_id) ORDER BY ac.ticket_type'
     ).fetchall()
     assert rows == [
-        ('Level 2 Classes (Week 1)', '2025-05-22', 'concession', 2),
-        ('Level 2 Classes (Week 1)', '2025-05-22', 'member', 3),
+        ('Level 2 (2025-05-22)', '2025-05-22', 'concession', 2),
+        ('Level 2 (2025-05-22)', '2025-05-22', 'member', 3),
     ]
 
 
@@ -542,12 +552,12 @@ def test_count_grid_parse_records_counts_and_skips_mean_row(db):
     # two week rows -> two activities; the 'Mean' row has no week label and is ignored
     acts = db.conn.execute('SELECT name, date, activity_type, difficulty FROM activity ORDER BY date').fetchall()
     assert acts == [
-        ('Level 2 Classes (Week 1)', '2024-04-11', 'lesson', 'Level 2'),
-        ('Level 2 Classes (Week 2)', '2024-04-18', 'lesson', 'Level 2'),
+        ('Level 2 (2024-04-11)', '2024-04-11', 'lesson', 'Level 2'),
+        ('Level 2 (2024-04-18)', '2024-04-18', 'lesson', 'Level 2'),
     ]
     week1 = db.conn.execute(
         'SELECT ac.ticket_type, ac.head_count FROM attendance_count ac JOIN activity a USING(activity_id) '
-        "WHERE a.name='Level 2 Classes (Week 1)' ORDER BY ac.ticket_type"
+        "WHERE a.name='Level 2 (2024-04-11)' ORDER BY ac.ticket_type"
     ).fetchall()
     assert week1 == [('concession', 3), ('member', 16), ('ordinary', 8)]
 
@@ -557,11 +567,11 @@ def test_count_grid_undated_uses_anchor_and_normalises_level(db):
     ingest.Level2CountGridParser().parse(
         _count_grid_undated_ws(), db, term='Nov-Dec 2023', year=2023, ingest_id=None, week_anchor=datetime(2023, 11, 9)
     )
-    assert db.conn.execute('SELECT name FROM event').fetchone() == ('Nov-Dec 2023: Level 2',)
+    assert db.conn.execute('SELECT name FROM event').fetchone() == ('Nov-Dec 2023 Level 2 (2023)',)
     acts = db.conn.execute('SELECT name, date, difficulty FROM activity ORDER BY date').fetchall()
     assert acts == [
-        ('Level 2 Classes (Week 1)', '2023-11-09', 'Level 2'),
-        ('Level 2 Classes (Week 2)', '2023-11-16', 'Level 2'),
+        ('Level 2 (2023-11-09)', '2023-11-09', 'Level 2'),
+        ('Level 2 (2023-11-16)', '2023-11-16', 'Level 2'),
     ]
 
 
@@ -604,7 +614,7 @@ def test_ingest_folder_dispatches_and_reports_unhandled(tmp_path, db):
     assert ('Level 1 Attendance', 'roster') in handled
     assert any(sheet == 'Sales' for _, sheet in report.unhandled)
     # the roster activities made it into the db via the folder path
-    assert db.conn.execute("SELECT COUNT(*) FROM activity WHERE name='Week 1'").fetchone() == (1,)
+    assert db.conn.execute("SELECT COUNT(*) FROM activity WHERE name='Level 1 (2025-05-22)'").fetchone() == (1,)
 
 
 def test_ingest_folder_skips_readme_silently(tmp_path, db):
@@ -651,6 +661,42 @@ def test_ingest_folder_skips_membership_workbooks(tmp_path, db):
     assert db.conn.execute('SELECT COUNT(*) FROM event').fetchone() == (0,)
 
 
+def test_ingest_folder_reports_attendees_rollup_as_redundant(tmp_path, db):
+    """A plain 'Attendees' rollup is reported redundant — not unparsed — when its by-activity twin exists.
+
+    The dancecloud export carries both tabs; the rollup is the same bookings minus the dates, so no
+    parser claims it. It belongs in `redundant`, away from the 'needs a new parser' list, while the
+    dated 'Attendees By Activity' is ingested normally.
+    """
+    root = tmp_path / 'outputs'
+    root.mkdir()
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    by_act = _booking_by_activity_ws('Attendees By Activity')
+    rollup = _booking_summary_ws('Attendees')
+    for src in (by_act, rollup):
+        dst = wb.create_sheet(src.title)
+        for row in src.iter_rows(values_only=True):
+            dst.append(row)
+    wb.save(root / 'Level 2 Term B Attendees 2022-11-03_pseudonymised.xlsx')
+
+    report = ingest.ingest_folder(root, db)
+    assert ('Level 2 Term B Attendees 2022-11-03_pseudonymised.xlsx', 'Attendees') in report.redundant
+    assert all(sheet != 'Attendees' for _, sheet in report.unhandled)
+    assert any(p == 'booking_export' for _, _, p in report.handled)
+
+
+def test_ingest_folder_flags_lone_attendees_rollup(tmp_path, db):
+    """A lone 'Attendees' rollup (no by-activity twin) is still flagged — it may be the only record."""
+    root = tmp_path / 'outputs'
+    root.mkdir()
+    _booking_summary_ws('Attendees').parent.save(root / 'ESDS Level 2 classes Feb March_pseudonymised.xlsx')
+
+    report = ingest.ingest_folder(root, db)
+    assert ('ESDS Level 2 classes Feb March_pseudonymised.xlsx', 'Attendees') in report.unhandled
+    assert report.redundant == []
+
+
 def test_ingest_folder_skips_bookkeeping_sheets(tmp_path, db):
     """'Exceptions', 'Loyalty' and 'Tickets' tabs carry no per-session attendance."""
     root = tmp_path / 'outputs'
@@ -678,14 +724,14 @@ def test_l2_so_parse_maps_categories_to_lesson_and_social(db):
     """Each night yields a Level 2 lesson and/or a social; activities are created lazily."""
     ingest.L2SOAttendanceParser().parse(_l2_so_ws(), db, term='Jan 2026', year=2026, ingest_id=None)
     ev = db.conn.execute('SELECT name, event_type FROM event').fetchone()
-    assert ev == ('Jan 2026: 2026 L2 & SO', 'course')
+    assert ev == ('Jan 2026 Level 2 (2026)', 'course')
 
     # Only the (date, kind) pairs that actually occur are created — no phantom activities,
     # and the '=countif(...)' summary row is never read as a category.
     acts = {(r[0], r[1], r[2]) for r in db.conn.execute('SELECT name, activity_type, difficulty FROM activity')}
     assert acts == {
         ('Level 2 (2026-01-15)', 'lesson', 'Level 2'),  # DNC-1 attended, DNC-2 absent
-        ('Social (2026-01-22)', 'social', 'social'),  # DNC-1 social-only
+        ('social (2026-01-22)', 'social', 'social'),  # DNC-1 social-only
         ('Level 2 (2026-01-22)', 'lesson', 'Level 2'),  # DNC-2 attended
     }
 
@@ -699,7 +745,7 @@ def test_l2_so_parse_records_attendance_by_category(db):
         'SELECT a.name, att.status FROM attendance att JOIN activity a USING(activity_id) '
         "WHERE att.dancer_id='DNC-1' ORDER BY a.name"
     ).fetchall()
-    assert dnc1 == [('Level 2 (2026-01-15)', 'attended'), ('Social (2026-01-22)', 'attended')]
+    assert dnc1 == [('Level 2 (2026-01-15)', 'attended'), ('social (2026-01-22)', 'attended')]
 
     # DNC-2: 'Absent' on 01-15 -> Level 2 roster row, did not attend; 'Level 2 & Social' on 01-22.
     dnc2 = db.conn.execute(
@@ -825,9 +871,10 @@ def test_booking_export_dated_records_unknown_per_session(db):
     ingest.BookingExportParser().parse(
         _booking_by_activity_ws(), db, term='Level 1 Fundamentals Term A 2023-01-17 2255', year=2023, ingest_id=None
     )
-    # export tail stripped from the event name; the year disambiguates same-named terms
+    # export tail stripped; the session-month window (these bookings sit in January) disambiguates
+    # ESDS's reused 'Term A/B' labels within a year, where the term name carries no month of its own
     assert db.conn.execute('SELECT name, event_type FROM event').fetchone() == (
-        'Level 1 Fundamentals Term A (2023)',
+        'Level 1 Fundamentals Term A (Jan 2023)',
         'course',
     )
     assert sorted(r[0] for r in db.conn.execute('SELECT date FROM activity')) == ['2023-01-19', '2023-01-26']
@@ -843,6 +890,54 @@ def test_booking_export_dated_records_unknown_per_session(db):
         ('2023-01-26', 'DNC-2', 'absent'),  # cancelled booking
     ]
     assert db.conn.execute("SELECT COUNT(*) FROM attendance WHERE status='attended'").fetchone() == (0,)
+
+
+def test_course_window_spans_session_months():
+    """A course window is a single month or a Mmm-Mmm span over the session dates, year-suffixed."""
+    assert ingest._course_window([datetime(2022, 6, 16), datetime(2022, 7, 21)], 2022) == 'Jun-Jul 2022'
+    assert ingest._course_window([datetime(2022, 3, 31)], 2022) == 'Mar 2022'
+    assert ingest._course_window([], 2022) is None  # no dates -> caller falls back to the bare year
+
+
+def test_course_event_name_folds_window_only_when_name_lacks_a_month():
+    """The window separates month-less 'Term A/B' names but is suppressed when the name names months."""
+    # 'Term B' carries no month, so the window replaces the bare year and splits the reused label
+    assert (
+        ingest._course_event_name('Level 1 Fundamentals Term B', 2022, 'Level 1', 'Mar-Apr 2022')
+        == 'Level 1 Fundamentals Term B (Mar-Apr 2022)'
+    )
+    # the newer termly name already says 'May-Jun', so repeating it is noise: keep the plain year
+    assert ingest._course_event_name('May-Jun 2025', 2025, 'Level 1', 'May 2025') == 'May-Jun 2025 Level 1 (2025)'
+    # no window available -> bare year, as before
+    assert (
+        ingest._course_event_name('Level 1 Fundamentals Term B', 2022, 'Level 1')
+        == 'Level 1 Fundamentals Term B (2022)'
+    )
+
+
+def _booking_ws_on(month: int, day: int, title='Attendees By Activity'):
+    """A minimal dated booking view: one dancer, one session, on the given 2023 date."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['A1'], ws['B1'], ws['C1'], ws['D1'] = 'dancer_id', 'Activity', 'Date', 'Status'
+    ws['A2'], ws['B2'], ws['C2'], ws['D2'] = 'DNC-1', 'Lesson', datetime(2023, month, day, 19, 15), 'Confirmed'
+    return ws
+
+
+def test_booking_export_same_term_name_splits_by_session_months(db):
+    """One reused 'Term B' label across non-overlapping months becomes distinct events.
+
+    Two booking exports share a term name but sit in different months; the session-month window
+    keeps them apart. A re-export of one of them (same month) must collapse back, not split.
+    """
+    p = ingest.BookingExportParser()
+    p.parse(_booking_ws_on(1, 19), db, term='Level 1 Term B', year=2023, ingest_id=None)  # January
+    p.parse(_booking_ws_on(9, 6), db, term='Level 1 Term B', year=2023, ingest_id=None)  # September
+    p.parse(_booking_ws_on(9, 13), db, term='Level 1 Term B', year=2023, ingest_id=None)  # re-export -> merges
+
+    names = sorted(r[0] for r in db.conn.execute('SELECT name FROM event'))
+    assert names == ['Level 1 Term B (Jan 2023)', 'Level 1 Term B (Sep 2023)']
 
 
 def test_booking_export_single_event_is_mostly_unknown(db):

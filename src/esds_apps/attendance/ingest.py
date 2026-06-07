@@ -352,12 +352,18 @@ class RosterParser:
 
         title = ws.title
         event_type = _event_type_for(title)
-        event_id = db.upsert_event(f'{term}: {_strip_attendance(title)}', event_type)
+        window = _course_window((dt for _, _, dt in sessions), year)
+        event_id = db.upsert_event(_event_name(term, title, year, event_type, window), event_type)
 
         for col, name, dt in sessions:
             activity_type = _activity_type_for(name, event_type)
-            difficulty = 'social' if activity_type == ActivityType.SOCIAL else _difficulty_for(name, title)
-            activity_id = db.upsert_activity(event_id, name, dt, activity_type, difficulty)
+            # Resolve the level from the column, then the sheet title, then the term/filename. The
+            # term fallback matters for unification: a booking export reads its level from the
+            # filename, so a roster whose title omits it (a dated 'Attendees' tab) must reach the
+            # same level here, or the two sources name the session differently and never merge.
+            difficulty = 'social' if activity_type == ActivityType.SOCIAL else _difficulty_for(name, title, term)
+            activity_name = _activity_name(name, activity_type, difficulty, dt.date().isoformat(), event_type)
+            activity_id = db.upsert_activity(event_id, activity_name, dt, activity_type, difficulty)
             attended_by: dict[str, list[bool]] = defaultdict(list)
             for r in range(header_row + 1, len(matrix)):
                 row = matrix[r]
@@ -446,6 +452,14 @@ def _scan_tally(matrix: list[tuple]) -> _Tally:
     return t
 
 
+def _tally_dates(t: _Tally, year: int | None):
+    """The session date of every week label on a tally sheet, for deriving the event's window."""
+    for week_no, day, month_name in t.weeks.values():
+        month = _month_number(month_name)
+        if month is not None and year is not None:
+            yield datetime(year, month, day)
+
+
 def _group_for_col(t: _Tally, col1: int) -> str | None:
     candidates = [(c, label) for c, label in t.groups if c <= col1]
     return max(candidates)[1] if candidates else None
@@ -495,7 +509,9 @@ class Level2TallyParser:
         """Ingest one tally tab: a headcount per (week, activity group, ticket type)."""
         matrix = list(ws.iter_rows(values_only=True))
         t = _scan_tally(matrix)
-        event_id = db.upsert_event(f'{term}: {_strip_attendance(ws.title)}', _event_type_for(ws.title))
+        event_type = _event_type_for(ws.title)
+        window = _course_window(_tally_dates(t, year), year)
+        event_id = db.upsert_event(_event_name(term, ws.title, year, event_type, window), event_type)
 
         for r, row in enumerate(matrix, start=1):
             for c, value in enumerate(row, start=1):
@@ -519,11 +535,13 @@ class Level2TallyParser:
         activity_date = datetime(year, month, day)
 
         head_count = _count_true(t, start_col, start_row, end_col, end_row)
-        activity_type = _activity_type_for(group, _event_type_for(title))
+        event_type = _event_type_for(title)
+        activity_type = _activity_type_for(group, event_type)
         difficulty = 'social' if activity_type == ActivityType.SOCIAL else _difficulty_for(group)
-        activity_id = db.upsert_activity(
-            event_id, f'{group} (Week {week_no})', activity_date, activity_type, difficulty
+        name = _activity_name(
+            f'{group} (Week {week_no})', activity_type, difficulty, activity_date.date().isoformat(), event_type
         )
+        activity_id = db.upsert_activity(event_id, name, activity_date, activity_type, difficulty)
         cell = f'{title}!{get_column_letter(col1)}{row1}'
         db.record_count(activity_id, ticket_type, head_count, ingest_id=ingest_id, source_cell=cell)
 
@@ -576,6 +594,13 @@ class Level2CountGridParser:
             return week_anchor + timedelta(weeks=week_no - 1)
         return None
 
+    @classmethod
+    def _row_date(cls, row: tuple, year: int | None, week_anchor: datetime | None) -> datetime | None:
+        """The session date of a 'Week N' row, or None if the first cell isn't a week label."""
+        label = row[0] if row else None
+        m = _WEEK_NO_RE.search(label) if isinstance(label, str) else None
+        return cls._week_date(label, int(m.group(1)), year, week_anchor) if m else None
+
     def parse(
         self,
         ws,
@@ -589,7 +614,8 @@ class Level2CountGridParser:
         matrix = list(ws.iter_rows(values_only=True))
         _, cols = self._ticket_columns(matrix)
         event_type = _event_type_for(ws.title)
-        event_id = db.upsert_event(f'{term}: {_strip_attendance(ws.title)}', event_type)
+        window = _course_window((self._row_date(row, year, week_anchor) for row in matrix), year)
+        event_id = db.upsert_event(_event_name(term, ws.title, year, event_type, window), event_type)
 
         for r, row in enumerate(matrix):
             label = row[0] if row else None
@@ -600,10 +626,11 @@ class Level2CountGridParser:
             activity_date = self._week_date(label, week_no, year, week_anchor)
             if activity_date is None:
                 continue
-            name = f'Level 2 Classes (Week {week_no})'
-            activity_id = db.upsert_activity(
-                event_id, name, activity_date, _activity_type_for(name, event_type), _difficulty_for(name)
-            )
+            raw_name = f'Level 2 Classes (Week {week_no})'
+            activity_type = _activity_type_for(raw_name, event_type)
+            difficulty = _difficulty_for(raw_name)
+            name = _activity_name(raw_name, activity_type, difficulty, activity_date.date().isoformat(), event_type)
+            activity_id = db.upsert_activity(event_id, name, activity_date, activity_type, difficulty)
             for c, ticket_type in cols.items():  # c is a 0-based column index
                 value = row[c] if c < len(row) else None
                 if isinstance(value, bool) or not isinstance(value, (int, float)):
@@ -669,15 +696,17 @@ class L2SOAttendanceParser:
         sessions = _session_columns(matrix, header_row)
 
         title = ws.title
-        event_id = db.upsert_event(f'{term}: {_strip_attendance(title)}', _event_type_for(title))
+        event_type = _event_type_for(title)
+        window = _course_window((dt for _, _, dt in sessions), year)
+        event_id = db.upsert_event(_event_name(term, title, year, event_type, window), event_type)
 
         activities: dict[tuple, int] = {}  # (date_iso, ActivityType) -> activity_id
 
         def activity_for(dt: datetime, kind: ActivityType) -> int:
             key = (dt.date().isoformat(), kind)
             if key not in activities:
-                name = f'Level 2 ({key[0]})' if kind == ActivityType.LESSON else f'Social ({key[0]})'
                 difficulty = 'Level 2' if kind == ActivityType.LESSON else 'social'
+                name = _activity_name(key[0], kind, difficulty, key[0], event_type)
                 activities[key] = db.upsert_activity(event_id, name, dt, kind, difficulty)
             return activities[key]
 
@@ -924,16 +953,22 @@ class BookingExportParser:
         cols = self._columns(matrix[header_row])
 
         event_type = _event_type_for(term)
-        event_id = db.upsert_event(_booking_event_name(term, year), event_type)
         fallback_dt = _date_from_title(ws.title) or _date_from_title(term)
         best = self._best_status_per_pair(matrix, header_row, cols, fallback_dt, ws.title)
+        if event_type == EventType.COURSE:
+            window = _course_window((_parse_dt(date_iso) for date_iso, _ in best), year)
+            event_name = _course_event_name(term, year, _difficulty_for(term), window)
+        else:
+            event_name = _booking_event_name(term, year)
+        event_id = db.upsert_event(event_name, event_type)
 
         activity_type = _activity_type_for(term, event_type)
         difficulty = 'social' if activity_type == ActivityType.SOCIAL else _difficulty_for(term)
-        name = 'Social' if activity_type == ActivityType.SOCIAL else 'Lesson'
+        raw_name = 'Social' if activity_type == ActivityType.SOCIAL else 'Lesson'
         activities: dict[str, int] = {}
         for (date_iso, did), (status, cell) in best.items():
             if date_iso not in activities:
+                name = _activity_name(raw_name, activity_type, difficulty, date_iso, event_type)
                 activities[date_iso] = db.upsert_activity(event_id, name, date_iso, activity_type, difficulty)
             db.record_attendance(activities[date_iso], did, status=status, ingest_id=ingest_id, source_cell=cell)
 
@@ -982,12 +1017,20 @@ PARSERS = [
 class IngestReport:
     handled: list[tuple] = field(default_factory=list)  # (file, sheet, parser_name)
     unhandled: list[tuple] = field(default_factory=list)  # (file, sheet)
+    redundant: list[tuple] = field(default_factory=list)  # (file, sheet) — captured elsewhere, intentionally skipped
 
     def summary(self) -> str:
         """Human-readable report of what was ingested and what was skipped."""
-        lines = [f'{len(self.handled)} sheet(s) ingested, {len(self.unhandled)} skipped.']
+        lines = [
+            f'{len(self.handled)} sheet(s) ingested, {len(self.unhandled)} need a parser, '
+            f'{len(self.redundant)} redundant.'
+        ]
         for f, s, p in self.handled:
             lines.append(f'  [{p}] {f} :: {s}')
+        if self.redundant:
+            lines.append("Skipped (redundant — same bookings as the 'Attendees By Activity' tab in the file):")
+            for f, s in self.redundant:
+                lines.append(f'  - {f} :: {s}')
         if self.unhandled:
             lines.append('Skipped (no matching parser — would need a new one):')
             for f, s in self.unhandled:
@@ -1014,6 +1057,95 @@ def _booking_event_name(term: str, year: int | None) -> str:
     """
     base = _EXPORT_SUFFIX_RE.sub('', _strip_attendance(term)).strip()
     return f'{base} ({year})' if year else base
+
+
+# Month names (and the common 'Sept' variant) used to tell whether a term name already carries
+# its own time qualifier. The newer termly workbooks do ('May-Jun 2025 Attendance'); the older
+# booking exports don't ('Level 1 Fundamentals Term B').
+_MONTH_ABBR = ('', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec')
+_MONTH_NAME_RE = re.compile(r'\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec)', re.IGNORECASE)
+
+
+def _has_month_name(text: str) -> bool:
+    """True if a name already carries a month qualifier, so a derived window would just repeat it."""
+    return _MONTH_NAME_RE.search(text) is not None
+
+
+def _course_window(dates, year: int | None) -> str | None:
+    """A 'Mmm YYYY' / 'Mmm-Mmm YYYY' label spanning the months of a course's session dates.
+
+    This is the axis that separates ESDS's reused 'Term A/B' labels within one year: the same
+    name recurs three times across 2022 (spring / summer / autumn), but each occupies its own,
+    non-overlapping run of session dates. Built from the dates inside the sheets — not the
+    export timestamp in the filename, which the export-suffix strip deliberately discards so
+    re-exports of one term still collapse — so every source of one term derives the same window
+    and converges. None when no dates are known (the caller falls back to the bare year). A term
+    that straddles the new year would mis-order its months, but ESDS terms don't, and the
+    workbook year is resolved as the dominant one regardless.
+    """
+    months = sorted({d.month for d in dates if d is not None})
+    if not months:
+        return None
+    span = _MONTH_ABBR[months[0]] if months[0] == months[-1] else f'{_MONTH_ABBR[months[0]]}-{_MONTH_ABBR[months[-1]]}'
+    return f'{span} {year}' if year else span
+
+
+def _course_event_name(term: str, year: int | None, difficulty: str | None, window: str | None = None) -> str:
+    """Canonical event name for a *course*, shared by every parser so its sources converge.
+
+    One term's course is described by several sheets — a weekly roster, a Level 2 tally, the
+    dancecloud booking export — under different names. Building the event name from the same
+    parts collapses them into one event. The export tail and a year suffix are handled as for
+    ``_booking_event_name``; on top, the *level* (difficulty) is folded in when the term text
+    doesn't already carry it. The level is the axis that separates concurrent courses in one
+    term, and it lives in the tab title for a multi-course workbook ('Level 1'/'Level 2' tabs,
+    generic filename) but in the filename for a booking export — folding it in either way lets
+    those two meet while keeping the two levels of one workbook apart.
+
+    The *time* axis is folded in the same way: when the term name has no month of its own, the
+    session-date ``window`` replaces the plain year so ESDS's reused 'Term A/B' labels separate
+    within a year. A name that already names its months ('May-Jun 2025') is trusted as-is, both
+    to avoid repetition and because all its sources share that name and so stay converged.
+    """
+    base = _EXPORT_SUFFIX_RE.sub('', _strip_attendance(term)).strip()
+    if difficulty and difficulty.lower() not in base.lower():
+        base = f'{base} {difficulty}'.strip()
+    if window and not _has_month_name(base):
+        return f'{base} ({window})'
+    return f'{base} ({year})' if year else base
+
+
+def _course_activity_name(activity_type: ActivityType, difficulty: str | None, date_iso: str) -> str:
+    """Canonical name for one course session, shared by every parser so its sources converge.
+
+    A course session recurs across sources under different labels — '2022-06-16' (roster),
+    'Level 2 Classes (Week 1)' (tally), 'Lesson' (booking export) — which keeps re-ingests of
+    one term in separate activities. Naming it purely from what identifies the session — its
+    level (difficulty), or its type when no level applies, plus its date — makes those sources
+    land on one ``(event, name, date)`` key. A social's difficulty is 'social', so socials and
+    lessons on the same night stay distinct without needing the type spelled out separately.
+    """
+    label = difficulty or str(activity_type)
+    return f'{label} ({date_iso})'
+
+
+def _event_name(term: str, title: str, year: int | None, event_type: EventType, window: str | None = None) -> str:
+    """Event name for a title-bearing sheet: canonical for a course, else term + tidied title.
+
+    The booking export, which has no meaningful tab title, builds its non-course name elsewhere.
+    """
+    if event_type == EventType.COURSE:
+        return _course_event_name(term, year, _difficulty_for(title, term), window)
+    return f'{term}: {_strip_attendance(title)}'
+
+
+def _activity_name(
+    raw_name: str, activity_type: ActivityType, difficulty: str | None, date_iso: str, event_type: EventType
+) -> str:
+    """Activity name: canonical for a course session, else the parser's own raw label."""
+    if event_type == EventType.COURSE:
+        return _course_activity_name(activity_type, difficulty, date_iso)
+    return raw_name
 
 
 def _term_from(path) -> str:
@@ -1060,6 +1192,25 @@ _NON_ATTENDANCE_SHEETS = ('readme', 'member', 'mail', 'exceptions', 'loyalty', '
 _NON_ATTENDANCE_FILES = ('membership', 'master members')
 
 
+# A dancecloud export carries both a dated 'Attendees By Activity' view (one row per dancer per
+# session) and a plain 'Attendees' rollup of the same bookings with the per-session dates dropped.
+# When both are present the rollup is wholly contained in the by-activity view, so no parser claims
+# it — but it should be reported as redundant, not as a sheet that "needs a new parser". The rollup
+# is only treated as redundant when its by-activity sibling actually exists: a lone 'Attendees' tab
+# (e.g. the Feb-March classes workbook, which has 'Class List' + 'Attendees' and no by-activity view)
+# is still flagged, because then it may be the only record of those bookings.
+_BY_ACTIVITY_TITLE = 'attendees by activity'
+_ROLLUP_TITLE = 'attendees'
+
+
+def _redundant_rollup_titles(wb) -> set[str]:
+    """Titles of plain 'Attendees' rollup sheets made redundant by an 'Attendees By Activity' sibling."""
+    titles = {ws.title.strip().lower() for ws in wb.worksheets}
+    if _BY_ACTIVITY_TITLE not in titles:
+        return set()
+    return {ws.title for ws in wb.worksheets if ws.title.strip().lower() == _ROLLUP_TITLE}
+
+
 def ingest_folder(output_root, db: AttendanceDb, parsers: list | None = None) -> IngestReport:
     """Walk the attendance_outputs tree, dispatch each sheet to a matching parser."""
     parsers = parsers if parsers is not None else PARSERS
@@ -1072,13 +1223,17 @@ def ingest_folder(output_root, db: AttendanceDb, parsers: list | None = None) ->
         rel = path.relative_to(output_root).as_posix()
         wb = openpyxl.load_workbook(path, data_only=False)
         term, year, anchor = _term_from(path), _resolve_year(wb), _week_anchor(wb)
+        redundant_titles = _redundant_rollup_titles(wb)
         for ws in wb.worksheets:
             ws_lower = ws.title.strip().lower()
             if any(pattern in ws_lower for pattern in _NON_ATTENDANCE_SHEETS):
                 continue  # skip non-attendance sheets
             parser = next((p for p in parsers if p.matches(ws)), None)
             if parser is None:
-                report.unhandled.append((rel, ws.title))
+                # The plain 'Attendees' rollup of a dancecloud export is the same bookings as its
+                # 'Attendees By Activity' sibling minus the dates — captured, not unparsed.
+                bucket = report.redundant if ws.title in redundant_titles else report.unhandled
+                bucket.append((rel, ws.title))
                 continue
             ingest_id = db.start_ingest(rel, ws.title)
             parser.parse(ws, db, term=term, year=year, ingest_id=ingest_id, week_anchor=anchor)

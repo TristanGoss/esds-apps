@@ -32,6 +32,34 @@ _SENTINEL = b'esds-pseudonymise-v1'
 # Accepts letters (including accented), apostrophes, hyphens, spaces, and initials with periods.
 # Rejects anything with digits or most punctuation — i.e. footer notes, not names.
 _VALID_NAME_RE = re.compile(r"^[A-Za-zÀ-ž'\-\s\.]+$")
+
+# Summary/aggregate row labels that sit in a name column on the attendance sheets (e.g. the
+# 'Totals' / 'All Attendance' / 'Social Only' rows beneath the L2 register). These are pure
+# letters, so _VALID_NAME_RE accepts them — without this blocklist each would be minted as a
+# spurious dancer. Matched case-insensitively against the whole, stripped cell. No real surname
+# collides with these, so rejecting them outright is safe.
+_NON_NAME_LABELS = frozenset(
+    {
+        'total',
+        'totals',
+        'subtotal',
+        'grand total',
+        'overall',
+        'all attendance',
+        'attendance',
+        'social only',
+        'social-only',
+        'level 2',
+        'level 1',
+        'lesson',
+        'social',
+        'mean',
+        'average',
+        'averages',
+        'sum',
+        'count',
+    }
+)
 _EMAIL_MATCH_THRESHOLD = 0.5
 
 _CANONICAL_NAME_ORDER = ['first_name', 'last_name']
@@ -431,7 +459,7 @@ def _record_fields(row: dict, name_cols: list[str], email_cols: list[str]) -> tu
     raw_name = {}
     for c in name_cols:
         val = row.get(c, '').strip()
-        if val and _VALID_NAME_RE.match(val):
+        if val and _VALID_NAME_RE.match(val) and val.lower() not in _NON_NAME_LABELS:
             raw_name[_canonical_name_key(c)] = val
     name_fields = {k: raw_name[k] for k in _CANONICAL_NAME_ORDER if k in raw_name} or None
 

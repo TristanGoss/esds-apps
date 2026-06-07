@@ -271,16 +271,28 @@ class AttendanceDb:
         ``status`` is an :class:`AttendanceStatus` rather than a bool so the row says exactly
         what is known — attended, absent, or attendance-unknown — without a reader having to
         infer it from a NULL or a missing row.
+
+        When two sources describe the same (activity, dancer) — typically a weekly roster that
+        captured turnout and a booking export that only knows a ticket was bought — the more
+        informative reading wins: **attended > absent > unknown**. The merge is a total order
+        on rank, so it is independent of ingest order (a later UNKNOWN never demotes a recorded
+        attendance, and a later ABSENT never overwrites an ATTENDED). The provenance columns
+        (ingest_id, source_cell) follow the kept status; ticket_type is COALESCE'd so either
+        source can fill it.
         """
         self.ensure_dancer(dancer_id)
+        # Rank the incoming status against the stored one; the higher rank is kept. On a tie
+        # (same rank) the incoming row is taken, so a re-ingest still refreshes provenance.
+        rank = "(CASE {0} WHEN 'attended' THEN 2 WHEN 'absent' THEN 1 ELSE 0 END)"
+        incoming_at_least = f'{rank.format("excluded.status")} >= {rank.format("status")}'
         self.conn.execute(
             'INSERT INTO attendance (activity_id, dancer_id, status, ticket_type, ingest_id, source_cell) '
             'VALUES (?, ?, ?, ?, ?, ?) '
             'ON CONFLICT(activity_id, dancer_id) DO UPDATE SET '
-            '  status = excluded.status, '
+            f'  status = CASE WHEN {incoming_at_least} THEN excluded.status ELSE status END, '
             '  ticket_type = COALESCE(excluded.ticket_type, ticket_type), '
-            '  ingest_id = excluded.ingest_id, '
-            '  source_cell = excluded.source_cell',
+            f'  ingest_id = CASE WHEN {incoming_at_least} THEN excluded.ingest_id ELSE ingest_id END, '
+            f'  source_cell = CASE WHEN {incoming_at_least} THEN excluded.source_cell ELSE source_cell END',
             (activity_id, dancer_id, str(status), _tt(ticket_type), ingest_id, source_cell),
         )
         self.conn.commit()

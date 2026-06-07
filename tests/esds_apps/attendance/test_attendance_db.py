@@ -131,6 +131,33 @@ def test_record_attendance_registers_dancer(db):
     assert db.conn.execute('SELECT 1 FROM dancer WHERE dancer_id=?', ('DNC-Z',)).fetchone() == (1,)
 
 
+@pytest.mark.parametrize(
+    ('first', 'second', 'expected'),
+    [
+        # A more informative reading upgrades a less informative one (either order).
+        (AttendanceStatus.UNKNOWN, AttendanceStatus.ATTENDED, 'attended'),
+        (AttendanceStatus.UNKNOWN, AttendanceStatus.ABSENT, 'absent'),
+        (AttendanceStatus.ABSENT, AttendanceStatus.ATTENDED, 'attended'),
+        # ...and a less informative one never demotes it: attended > absent > unknown is a total
+        # order, so the merge is independent of ingest order.
+        (AttendanceStatus.ATTENDED, AttendanceStatus.UNKNOWN, 'attended'),
+        (AttendanceStatus.ABSENT, AttendanceStatus.UNKNOWN, 'absent'),
+        (AttendanceStatus.ATTENDED, AttendanceStatus.ABSENT, 'attended'),
+    ],
+)
+def test_record_attendance_keeps_most_informative_status(db, first, second, expected):
+    # The Term B double-ingest case: a roster knows turnout, a booking export only knows a
+    # ticket was bought; whichever order they arrive, the stronger fact must survive.
+    eid = db.upsert_event('E', EventType.COURSE)
+    act = db.upsert_activity(eid, 'W1', date(2022, 6, 16))
+    db.record_attendance(act, 'DNC-1', status=first, source_cell='first')
+    db.record_attendance(act, 'DNC-1', status=second, source_cell='second')
+    row = db.conn.execute('SELECT status, source_cell FROM attendance WHERE activity_id=?', (act,)).fetchone()
+    assert row[0] == expected
+    # Provenance follows the kept status: the row that lost an arbitration doesn't claim it.
+    assert row[1] == ('second' if str(second) == expected else 'first')
+
+
 # ---- counts ----
 
 
