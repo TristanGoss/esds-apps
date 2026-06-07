@@ -53,9 +53,14 @@ _LEVEL_2_3_RE = re.compile(r'level\s*2\s*[/&-]\s*3\b', re.IGNORECASE)
 
 
 def _is_group_header(text: str) -> bool:
-    """True for a tally activity-group header. Tolerates 'Level 2 Class'/'Level 2 Classes'."""
+    """True for a tally activity-group header.
+
+    Tolerates the singular/plural 'Level 1 Class(es)' / 'Level 2 Class(es)' and the 'Social Only'
+    group. The one-off tallies (e.g. Teacher's Choice) carry all three side by side; the weekly
+    Level 2 tallies carry only 'Level 2 Classes' and 'Social Only'.
+    """
     t = text.strip().lower()
-    return t == 'social only' or t.startswith('level 2 class')
+    return t == 'social only' or t.startswith('level 1 class') or t.startswith('level 2 class')
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +197,21 @@ def _date_from_title(text: str) -> datetime | None:
     return datetime(int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else None
 
 
+# A 'DD[th] Month' day+month with no year, as on a one-off tally's tab name ('Teacher's Choice 12th
+# Dec'). The year is missing from the tab, so it is supplied separately (the workbook's resolved year).
+_DAY_MONTH_RE = re.compile(r'(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]+)')
+
+
+def _date_from_day_month(text: str, year: int | None) -> datetime | None:
+    """Parse a year-less 'DD[th] Month' out of a title and combine it with ``year``, or None."""
+    if year is None:
+        return None
+    m = _DAY_MONTH_RE.search(text)
+    if m and (month := _month_number(m.group(2))):
+        return datetime(year, month, int(m.group(1)))
+    return None
+
+
 def _activity_type_for(label: str, event_type: EventType) -> ActivityType:
     """An activity's type. A social event holds only socials; otherwise the label decides.
 
@@ -275,14 +295,19 @@ def _concession_col(header: tuple) -> int | None:
     return None
 
 
-def _session_columns(matrix: list[tuple], header_row: int, week_anchor: datetime | None = None) -> list[tuple]:
+def _session_columns(
+    matrix: list[tuple], header_row: int, year: int | None = None, week_anchor: datetime | None = None
+) -> list[tuple]:
     """Session columns: a date either in the header row itself or the row directly above it.
 
     Older Level 1 tabs put the date in the row above a 'Week N' label; the 2026 tabs put
-    the date straight in the header row alongside 'dancer_id'. Some older tabs only dated
-    Week 1 and filled the rest with '=D2+7' formulas that the pseudonymiser stripped to
-    nothing — for those an undated 'Week N' column is placed at ``week_anchor + 7*(N-1)``.
-    Returns a list of (col_index, activity_name, datetime); activity type is decided in parse.
+    the date straight in the header row alongside 'dancer_id'. Two further variants carry no
+    real date cell, only a 'Week N' header label: a 'Week N (DD Mon)' label dates itself once a
+    ``year`` is known (the early-2022 'Class List' rosters), while a bare 'Week N' is placed at
+    ``week_anchor + 7*(N-1)``. A 'Week N' column is recognised as a session even when neither the
+    year nor the anchor is available — so layout detection (``matches``) sees it — with its date
+    left None; ``parse`` is always given the year/anchor and skips any column still left undated.
+    Returns a list of (col_index, activity_name, datetime|None); activity type is decided in parse.
     """
     head = matrix[header_row]
     above = matrix[header_row - 1] if header_row > 0 else ()
@@ -292,10 +317,14 @@ def _session_columns(matrix: list[tuple], header_row: int, week_anchor: datetime
         in_header = _parse_dt(head[c]) if c < len(head) else None
         dt = in_header or (_parse_dt(above[c]) if c < len(above) else None)
         if dt is None:
-            wk = _WEEK_NO_RE.search(label) if label else None
-            if wk is None or week_anchor is None:
-                continue
-            dt = week_anchor + timedelta(weeks=int(wk.group(1)) - 1)
+            if not (label and _WEEK_NO_RE.search(label)):
+                continue  # no date and not a 'Week N' column → not a session
+            wm = _WEEK_RE.search(label)  # 'Week N (DD Mon)' dates itself given the year
+            if wm and (month := _month_number(wm.group(3))) and year is not None:
+                dt = datetime(year, month, int(wm.group(2)))
+            elif week_anchor is not None:  # bare 'Week N' → anchor + 7*(N-1)
+                dt = week_anchor + timedelta(weeks=int(_WEEK_NO_RE.search(label).group(1)) - 1)
+            # else: a recognised 'Week N' column we can't date yet — keep it (dt None) for matches.
         # A date in the header cell is its own label; otherwise the header cell names it.
         name = label if (in_header is None and label and label.strip()) else dt.date().isoformat()
         out.append((c, str(name).strip(), dt))
@@ -347,7 +376,7 @@ class RosterParser:
         """Ingest one roster tab: an event, an activity per session column, attendance rows."""
         matrix = list(ws.iter_rows(values_only=True))
         header_row, dancer_col = _roster_header(matrix)
-        sessions = _session_columns(matrix, header_row, week_anchor)
+        sessions = _session_columns(matrix, header_row, year, week_anchor)
         ticket_by_did = self._ticket_by_dancer(matrix, header_row, dancer_col, _concession_col(matrix[header_row]))
 
         title = ws.title
@@ -356,6 +385,8 @@ class RosterParser:
         event_id = db.upsert_event(_event_name(term, title, year, event_type, window), event_type)
 
         for col, name, dt in sessions:
+            if dt is None:
+                continue  # a 'Week N' column we couldn't date (no year/anchor) — nothing to record
             activity_type = _activity_type_for(name, event_type)
             # Resolve the level from the column, then the sheet title, then the term/filename. The
             # term fallback matters for unification: a booking export reads its level from the
@@ -483,7 +514,12 @@ class Level2TallyParser:
     name = 'level2_tally'
 
     def matches(self, ws) -> bool:
-        """True if the sheet has COUNTIF-of-TRUE totals, a group header, and week labels."""
+        """True if the sheet has COUNTIF-of-TRUE totals, a group header, and a date axis.
+
+        The date axis is usually a column of 'Week N (DD Mon)' labels (the weekly Level 2 tallies).
+        A one-off tally (e.g. Teacher's Choice) has no weeks — its single session date sits in the
+        tab name instead ('... 12th Dec') — so a day+month there satisfies the requirement too.
+        """
         has_countif = has_group = has_week = False
         for row in ws.iter_rows(values_only=True):
             for value in row:
@@ -495,7 +531,8 @@ class Level2TallyParser:
                     has_group = True
                 if _WEEK_RE.search(value):
                     has_week = True
-        return has_countif and has_group and has_week
+        has_single_date = _DAY_MONTH_RE.search(ws.title) is not None
+        return has_countif and has_group and (has_week or has_single_date)
 
     def parse(
         self,
@@ -506,41 +543,52 @@ class Level2TallyParser:
         ingest_id: int | None,
         week_anchor: datetime | None = None,
     ) -> None:
-        """Ingest one tally tab: a headcount per (week, activity group, ticket type)."""
+        """Ingest one tally tab: a headcount per (week-or-single-date, activity group, ticket type)."""
         matrix = list(ws.iter_rows(values_only=True))
         t = _scan_tally(matrix)
         event_type = _event_type_for(ws.title)
-        window = _course_window(_tally_dates(t, year), year)
-        event_id = db.upsert_event(_event_name(term, ws.title, year, event_type, window), event_type)
+        # A one-off tally carries no week labels; its single date comes from the tab name + the year.
+        single_date = None if t.weeks else _date_from_day_month(ws.title, year)
+        if single_date is not None:
+            # Only one source describes this one-off, so name the event from its own tab rather than
+            # the generic term, keeping it distinct from the term's weekly Level 1/2 events.
+            event_id = db.upsert_event(f'{term}: {_strip_attendance(ws.title)}', event_type)
+        else:
+            window = _course_window(_tally_dates(t, year), year)
+            event_id = db.upsert_event(_event_name(term, ws.title, year, event_type, window), event_type)
 
         for r, row in enumerate(matrix, start=1):
             for c, value in enumerate(row, start=1):
                 if isinstance(value, str) and (m := _COUNTIF_RE.search(value)):
-                    self._ingest_total(db, t, event_id, ws.title, year, ingest_id, r, c, m)
+                    self._ingest_total(db, t, event_id, ws.title, year, ingest_id, r, c, m, single_date)
 
-    def _ingest_total(self, db, t, event_id, title, year, ingest_id, row1, col1, m) -> None:  # noqa: PLR0913
+    def _ingest_total(self, db, t, event_id, title, year, ingest_id, row1, col1, m, single_date=None) -> None:  # noqa: PLR0913
         start_col, start_row = column_index_from_string(m.group(1)), int(m.group(2))
         end_col, end_row = column_index_from_string(m.group(3)), int(m.group(4))
 
         group = _group_for_col(t, col1)
-        ticket_type = _ticket_for_totcell(t, row1, col1)
+        if group is None:
+            return  # can't place this total without an activity group
         week = t.weeks.get(start_row)
-        if group is None or week is None:
-            return  # can't place this total without a group and a date
+        if week is not None:
+            week_no, day, month_name = week
+            month = _month_number(month_name)
+            if month is None or year is None:
+                return
+            activity_date = datetime(year, month, day)
+            raw_name = f'{group} (Week {week_no})'
+        elif single_date is not None:
+            activity_date = single_date
+            raw_name = group
+        else:
+            return  # can't place this total without a date
 
-        week_no, day, month_name = week
-        month = _month_number(month_name)
-        if month is None or year is None:
-            return
-        activity_date = datetime(year, month, day)
-
+        ticket_type = _ticket_for_totcell(t, row1, col1)
         head_count = _count_true(t, start_col, start_row, end_col, end_row)
         event_type = _event_type_for(title)
         activity_type = _activity_type_for(group, event_type)
         difficulty = 'social' if activity_type == ActivityType.SOCIAL else _difficulty_for(group)
-        name = _activity_name(
-            f'{group} (Week {week_no})', activity_type, difficulty, activity_date.date().isoformat(), event_type
-        )
+        name = _activity_name(raw_name, activity_type, difficulty, activity_date.date().isoformat(), event_type)
         activity_id = db.upsert_activity(event_id, name, activity_date, activity_type, difficulty)
         cell = f'{title}!{get_column_letter(col1)}{row1}'
         db.record_count(activity_id, ticket_type, head_count, ingest_id=ingest_id, source_cell=cell)
@@ -693,7 +741,7 @@ class L2SOAttendanceParser:
         """Ingest one L2 & SO tab: a Level 2 lesson and a social per night, by ticket category."""
         matrix = list(ws.iter_rows(values_only=True))
         header_row, dancer_col = _roster_header(matrix)
-        sessions = _session_columns(matrix, header_row)
+        sessions = _session_columns(matrix, header_row, year)
 
         title = ws.title
         event_type = _event_type_for(title)
@@ -716,6 +764,8 @@ class L2SOAttendanceParser:
             if not (isinstance(did, str) and did.startswith('DNC-')):
                 continue
             for col, _, dt in sessions:
+                if dt is None:
+                    continue
                 value = row[col] if col < len(row) else None
                 entry = self._CATEGORIES.get(value.strip().lower()) if isinstance(value, str) else None
                 if entry is None:
@@ -798,18 +848,22 @@ class SocialRegisterParser:
     comes from the sheet tab name or the filename, since the cells carry none. A dancer_id
     repeated across rows (un-renamed extra tickets) becomes one named attendee plus anonymous
     extras, as in the roster layout.
+
+    The marker column may be entirely blank — a booked-but-not-yet-run party (the 'End of Term
+    Party' allocation lists) where turnout was never recorded. Then every booker is UNKNOWN
+    (a held place, turnout uncaptured) rather than ABSENT, and there are no anonymous extras.
     """
 
     name = 'social_register'
 
     def matches(self, ws) -> bool:
-        """True for a dancer_id register whose marker column is predominantly attendance marks.
+        """True for a dancer_id register that has a 'Present?'/'Attended' marker column and no dates.
 
-        A 'Present?'/'Attended' header is not enough: a booking list can carry such a column
-        that is mostly empty with the odd free-text note ('no show', 'paid £10 cash on door'),
-        which must not be read as an attendance register. So the non-empty marker cells (against
-        DNC- rows) must be mostly real yes/no marks. Dated session columns disqualify it — that
-        is the weekly roster's job.
+        The marker column must really be one: a booking list can carry a 'present' column that is
+        mostly empty with the odd free-text note ('no show', 'paid £10 cash on door'), which must
+        not be read as a register — so when the column is marked at all, the marks must mostly be
+        real yes/no marks. A wholly blank marker column is allowed (a booked-but-unrun party).
+        Dated session columns disqualify it — that is the weekly roster's job.
         """
         matrix = list(ws.iter_rows(values_only=True))
         header = _roster_header(matrix)
@@ -818,8 +872,11 @@ class SocialRegisterParser:
         header_row = header[0]
         if _session_columns(matrix, header_row):
             return False
-        filled, recognised = self._marker_fill(matrix, header_row, _register_blocks(matrix[header_row]))
-        return recognised > 0 and recognised >= filled / 2
+        blocks = _register_blocks(matrix[header_row])
+        if not blocks:
+            return False  # no Present?/Attended marker column → not a register
+        filled, recognised = self._marker_fill(matrix, header_row, blocks)
+        return filled == 0 or recognised >= filled / 2
 
     @staticmethod
     def _marker_fill(matrix: list[tuple], header_row: int, blocks: list[tuple]) -> tuple[int, int]:
@@ -858,18 +915,26 @@ class SocialRegisterParser:
         event_id = db.upsert_event(_strip_attendance(term), EventType.SOCIAL)
         activity_id = db.upsert_activity(event_id, 'Social', event_date, ActivityType.SOCIAL, 'social')
 
+        # If no marker cell anywhere is a real mark, the register records bookings whose turnout was
+        # never captured: every booker is UNKNOWN, and a blank does not mean absent. Mirrors the
+        # roster's column-marked rule. A marked register keeps present/absent + anonymous extras.
+        _, recognised = self._marker_fill(matrix, header_row, blocks)
+        register_marked = recognised > 0
+
         attendees = self._collect(matrix, header_row, blocks, ws.title)
         anonymous_extra = 0
         for did, (present_count, ticket_type, cell) in attendees.items():
+            status = _present_status(present_count >= 1) if register_marked else AttendanceStatus.UNKNOWN
             db.record_attendance(
                 activity_id,
                 did,
-                status=_present_status(present_count >= 1),
+                status=status,
                 ticket_type=ticket_type,
                 ingest_id=ingest_id,
                 source_cell=cell,
             )
-            anonymous_extra += max(present_count - 1, 0)  # un-renamed duplicate tickets → anonymous attendees
+            if register_marked:
+                anonymous_extra += max(present_count - 1, 0)  # un-renamed duplicate tickets → anonymous attendees
         if anonymous_extra:
             db.record_count(activity_id, None, anonymous_extra, ingest_id=ingest_id, source_cell=ws.title)
 
@@ -1152,7 +1217,19 @@ def _term_from(path) -> str:
     return _strip_attendance(path.stem.removesuffix('_pseudonymised'))
 
 
-def _resolve_year(wb) -> int | None:
+# A four-digit 20xx year, used to recover the year from the path when no dated cell carries it.
+_YEAR_IN_PATH_RE = re.compile(r'20\d\d')
+
+
+def _resolve_year(wb, path=None) -> int | None:
+    """The workbook's dominant year: from its dated cells, else from the file/folder name.
+
+    Date cells are authoritative and win when present. Some early sheets (the 2022 'Class List'
+    rosters) carry no real date — every session date lives inside a 'Week N (DD Mon)' label, with
+    the year only in the filename ('... 2022-02-07 ...') and the 'YYYY Attendance Records' folder.
+    For those, fall back to the most common 20xx token across the path (the export-time HHMM tail
+    like '2029' appears once, the real year twice, so the count breaks the tie correctly).
+    """
     years: Counter = Counter()
     for ws in wb.worksheets:
         for row in ws.iter_rows(values_only=True):
@@ -1160,7 +1237,13 @@ def _resolve_year(wb) -> int | None:
                 dt = _parse_dt(value)
                 if dt is not None:
                     years[dt.year] += 1
-    return years.most_common(1)[0][0] if years else None
+    if years:
+        return years.most_common(1)[0][0]
+    if path is not None:
+        path_years = Counter(int(y) for y in _YEAR_IN_PATH_RE.findall(str(path)))
+        if path_years:
+            return path_years.most_common(1)[0][0]
+    return None
 
 
 def _week_anchor(wb) -> datetime | None:
@@ -1222,7 +1305,7 @@ def ingest_folder(output_root, db: AttendanceDb, parsers: list | None = None) ->
             continue  # membership / master-members workbooks are not class or social attendance
         rel = path.relative_to(output_root).as_posix()
         wb = openpyxl.load_workbook(path, data_only=False)
-        term, year, anchor = _term_from(path), _resolve_year(wb), _week_anchor(wb)
+        term, year, anchor = _term_from(path), _resolve_year(wb, path), _week_anchor(wb)
         redundant_titles = _redundant_rollup_titles(wb)
         for ws in wb.worksheets:
             ws_lower = ws.title.strip().lower()

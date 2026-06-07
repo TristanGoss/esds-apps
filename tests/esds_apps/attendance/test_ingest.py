@@ -48,6 +48,27 @@ def _tally_ws(title='Level 2 & Social Only Attendanc'):
     return ws
 
 
+def _teachers_choice_tally_ws(title='Teachers Choice 12th Dec'):
+    """A one-off tally: Level 1 / Level 2 / Social Only groups, no week labels, date in the tab name.
+
+    Members COUNTIFs only, three groups side by side. Level 1 has 3 ticks, Level 2 has 2, Social
+    Only has 1. The single session date comes from the tab name ('12th Dec') plus the workbook year.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['B1'] = "Teacher's Choice Class attendance count (12th Dec 2024)"
+    ws['C2'], ws['U2'], ws['AM2'] = 'Level 1 Classes', 'Level 2 Classes', 'Social Only'
+    ws['C3'], ws['G3'] = 'Members', '=COUNTIF(C4:G6, "TRUE")'
+    ws['U3'], ws['Y3'] = 'Members', '=COUNTIF(U4:Y6, "TRUE")'
+    ws['AM3'], ws['AQ3'] = 'Members', '=COUNTIF(AM4:AQ6, "TRUE")'
+    for r in (4, 5, 6):
+        ws[f'C{r}'] = True  # Level 1: 3 ticks
+    ws['U4'], ws['U5'] = True, True  # Level 2: 2 ticks
+    ws['AM4'] = True  # Social Only: 1 tick
+    return ws
+
+
 def _count_grid_ws(title='Level 2'):
     wb = openpyxl.Workbook()
     ws = wb.active
@@ -121,6 +142,24 @@ def _l1_attendance_2026_ws(title='2026 L1 Attendance'):
     return ws
 
 
+def _class_list_roster_ws(title='Class List'):
+    """An early-2022 'Class List' roster: 'Week N (DD Mon)' headers, no date cells, a leading # column.
+
+    The session dates live only inside the week labels and the year only in the filename, so the
+    columns can only be dated once parse is given the year. A 'Lead / Follow' column sits between
+    the redacted name and the first week and must not be read as a session.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['B1'] = 'Attendee List: Level 2'
+    ws['B3'], ws['C3'], ws['D3'] = 'dancer_id', 'redacted', 'Lead / Follow'
+    ws['E3'], ws['F3'], ws['G3'] = 'Week 1 (10 Feb)', 'Week 2 (17 Feb)', 'Week 3 (24 Feb)'
+    ws['A4'], ws['B4'], ws['D4'], ws['E4'], ws['F4'], ws['G4'] = 1, 'DNC-1', 'Lead', True, False, True
+    ws['A5'], ws['B5'], ws['D5'], ws['E5'], ws['F5'], ws['G5'] = 2, 'DNC-2', 'Follow', True, True, 'False'
+    return ws
+
+
 def _roster_concession_ws(title='Level 1 Attendance'):
     """A roster carrying a per-dancer 'Concession' flag, captured as a ticket type.
 
@@ -185,6 +224,34 @@ def _attended_register_ws(title='26 March 23'):
     ws['A3'], ws['D3'], ws['E3'] = 'DNC-2', 'O7LY', 'x'
     ws['A4'], ws['D4'], ws['E4'] = 'DNC-2', 'O7LY', 'x'  # un-renamed extra ticket
     ws['A5'], ws['D5'] = 'DNC-3', 'O00J'  # blank Attended -> booked but absent
+    return ws
+
+
+def _blank_party_register_ws(title='Sheet1'):
+    """An 'End of Term Party' allocation list: a Present? column that is entirely blank.
+
+    Nobody's turnout was recorded, so every booker is a held place (UNKNOWN), not absent. The
+    event date is in a title cell/filename, not in the tab name. DNC-1 holds two places.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['B12'] = 'End of Term Party 27th June 2024'
+    ws['A13'], ws['B13'], ws['C13'], ws['D13'], ws['E13'] = '#', 'dancer_id', 'redacted', 'Concession', 'Present?'
+    ws['A14'], ws['B14'], ws['D14'] = 1, 'DNC-1', 'Yes'
+    ws['A15'], ws['B15'], ws['D15'] = 2, 'DNC-2', 'No'
+    ws['A16'], ws['B16'], ws['D16'] = 3, 'DNC-1', 'Yes'  # a second held place, blank marker
+    return ws
+
+
+def _dancer_list_no_marker_ws(title='Class List'):
+    """A dancer_id list with a Concession column but no Present?/Attended marker — not a register."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['A1'], ws['B1'], ws['C1'] = 'dancer_id', 'redacted', 'Concession'
+    ws['A2'], ws['C2'] = 'DNC-1', 'Yes'
+    ws['A3'], ws['C3'] = 'DNC-2', 'No'
     return ws
 
 
@@ -261,13 +328,27 @@ def test_is_true_negatives(value):
     [
         ('Level 2 Classes', True),  # plural (older sheets)
         ('Level 2 Class', True),  # singular (2025-H2 sheets)
+        ('Level 1 Classes', True),  # one-off tallies (Teacher's Choice) carry a Level 1 group too
+        ('Level 1 Class', True),
         ('Social Only', True),
         ('Members', False),
-        ('Level 1', False),
+        ('Level 1', False),  # the bare level name is not a class-group header
     ],
 )
 def test_is_group_header(text, expected):
     assert ingest._is_group_header(text) is expected
+
+
+def test_resolve_year_prefers_date_cells_then_path(tmp_path):
+    """The dominant dated cell wins; with no dates, the year is recovered from the file/folder name."""
+    wb = openpyxl.Workbook()
+    wb.active['A1'] = 'Week 1 (10 Feb)'  # only a week label, no real date cell
+    assert ingest._resolve_year(wb) is None
+    # '2022' appears in the folder and the export date, '2029' (an export HHMM) only once -> 2022 wins
+    p = tmp_path / '2022 Attendance Records' / 'L2 classes Feb March Attendees 2022-02-07 2029.xlsx'
+    assert ingest._resolve_year(wb, p) == 2022
+    wb.active['A2'] = datetime(2024, 3, 1)  # a real date cell now overrides the path
+    assert ingest._resolve_year(wb, p) == 2024
 
 
 def test_parse_dt_handles_datetime_and_isoish_string():
@@ -461,6 +542,42 @@ def test_roster_without_anchor_keeps_only_dated_weeks(db):
     assert db.conn.execute('SELECT name FROM activity').fetchall() == [('Level 1 (2023-11-09)',)]
 
 
+def test_roster_matches_class_list_with_embedded_week_dates():
+    """A 'Class List' roster whose only dates are inside 'Week N (DD Mon)' headers is a roster.
+
+    Detection must not need the year (it isn't in the sheet), and the 'Lead / Follow' column is
+    not a session.
+    """
+    assert ingest.RosterParser().matches(_class_list_roster_ws())
+
+
+def test_roster_parses_embedded_week_dates_with_year(db):
+    """'Week N (DD Mon)' columns date themselves once the year (from the filename) is supplied."""
+    ingest.RosterParser().parse(
+        _class_list_roster_ws(), db, term='ESDS Level 2 Technique Feb March', year=2022, ingest_id=None
+    )
+    acts = db.conn.execute('SELECT name, date FROM activity ORDER BY date').fetchall()
+    assert acts == [
+        ('Level 2 (2022-02-10)', '2022-02-10'),
+        ('Level 2 (2022-02-17)', '2022-02-17'),
+        ('Level 2 (2022-02-24)', '2022-02-24'),
+    ]
+    # DNC-1 attended weeks 1 and 3, absent week 2; the 'Lead / Follow' column produced no activity
+    rows = dict(
+        db.conn.execute(
+            'SELECT a.date, att.status FROM attendance att JOIN activity a USING(activity_id) '
+            "WHERE att.dancer_id='DNC-1' ORDER BY a.date"
+        ).fetchall()
+    )
+    assert rows == {'2022-02-10': 'attended', '2022-02-17': 'absent', '2022-02-24': 'attended'}
+
+
+def test_roster_embedded_week_dates_need_a_year(db):
+    """Without a year the embedded-week columns can't be dated, so nothing is recorded (no crash)."""
+    ingest.RosterParser().parse(_class_list_roster_ws(), db, term='T', year=None, ingest_id=None)
+    assert db.conn.execute('SELECT COUNT(*) FROM activity').fetchone() == (0,)
+
+
 @pytest.mark.parametrize(
     ('value', 'expected'),
     [
@@ -542,6 +659,33 @@ def test_tally_parse_sets_event_and_activity_type(db):
     assert db.conn.execute('SELECT DISTINCT activity_type FROM activity').fetchone() == ('lesson',)
     # difficulty parsed from the group label 'Level 2 Classes'
     assert db.conn.execute('SELECT DISTINCT difficulty FROM activity').fetchone() == ('Level 2',)
+
+
+def test_tally_matches_one_off_single_date_tally():
+    """A tally with COUNTIFs and groups but no week labels matches via a day+month in the tab name."""
+    assert ingest.Level2TallyParser().matches(_teachers_choice_tally_ws())
+
+
+def test_tally_parse_one_off_uses_title_date_and_three_groups(db):
+    """A one-off tally dates every group from the tab name and names its event from the tab.
+
+    Level 1 / Level 2 / Social Only each become a 12-Dec activity with their head counts; the event
+    is named from the tab so it stays distinct from the term's weekly Level 1/2 events.
+    """
+    ingest.Level2TallyParser().parse(_teachers_choice_tally_ws(), db, term='Nov-Dec 2024', year=2024, ingest_id=None)
+    assert db.conn.execute('SELECT name, event_type FROM event').fetchone() == (
+        'Nov-Dec 2024: Teachers Choice 12th Dec',
+        'course',
+    )
+    rows = db.conn.execute(
+        'SELECT a.name, a.activity_type, a.difficulty, a.date, ac.head_count '
+        'FROM attendance_count ac JOIN activity a USING(activity_id) ORDER BY a.name'
+    ).fetchall()
+    assert rows == [
+        ('Level 1 (2024-12-12)', 'lesson', 'Level 1', '2024-12-12', 3),
+        ('Level 2 (2024-12-12)', 'lesson', 'Level 2', '2024-12-12', 2),
+        ('social (2024-12-12)', 'social', 'social', '2024-12-12', 1),
+    ]
 
 
 # ---- count-grid parsing ----
@@ -820,6 +964,35 @@ def test_social_register_matches_attended_marker_layout():
 def test_social_register_rejects_booking_list_with_empty_present_column():
     """A booking list with a mostly-empty 'present' notes column is not an attendance register."""
     assert not ingest.SocialRegisterParser().matches(_booking_list_ws())
+
+
+def test_social_register_rejects_dancer_list_without_marker_column():
+    """A dancer_id list with no Present?/Attended column is not a register (guards over-claiming)."""
+    assert not ingest.SocialRegisterParser().matches(_dancer_list_no_marker_ws())
+
+
+def test_social_register_matches_blank_marker_party_list():
+    """An allocation list with an entirely blank Present? column is still a register (turnout unknown)."""
+    assert ingest.SocialRegisterParser().matches(_blank_party_register_ws())
+
+
+def test_social_register_blank_marker_records_unknown_not_absent(db):
+    """When no marker is filled, every booker is UNKNOWN (a held place), not ABSENT; no anon extras."""
+    ingest.SocialRegisterParser().parse(
+        _blank_party_register_ws(), db, term='End of Term Party 27th June 2024', year=2024, ingest_id=None
+    )
+    assert db.conn.execute('SELECT name, event_type FROM event').fetchone() == (
+        'End of Term Party 27th June 2024',
+        'social',
+    )
+    assert db.conn.execute('SELECT date FROM activity').fetchone() == ('2024-06-27',)
+    # DNC-1's duplicate place collapses to one row; both bookers UNKNOWN
+    rows = dict(db.conn.execute('SELECT dancer_id, status FROM attendance').fetchall())
+    assert rows == {'DNC-1': 'unknown', 'DNC-2': 'unknown'}
+    tickets = dict(db.conn.execute('SELECT dancer_id, ticket_type FROM attendance').fetchall())
+    assert tickets == {'DNC-1': 'member_or_concession', 'DNC-2': 'ordinary'}
+    # an unmarked register makes no anonymous-extra head from the duplicate place
+    assert db.conn.execute('SELECT COUNT(*) FROM attendance_count').fetchone() == (0,)
 
 
 def test_social_register_parse_attended_layout_date_from_tab_name(db):
