@@ -23,6 +23,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Resp
 from fastapi.staticfiles import StaticFiles
 
 from esds_apps import config
+from esds_apps.attendance import analysis
 from esds_apps.auth import build_login_redirect, handle_oauth_callback, login_required, require_valid_cookie
 from esds_apps.classes import MembershipCardStatus, PrintablePdfError
 from esds_apps.dancecloud_interface import (
@@ -161,6 +162,19 @@ async def attendance_activities(request: Request, _: None = Depends(require_vali
     """
     try:
         return JSONResponse({'activities': _attendance_activity_rows()})
+    except FileNotFoundError:
+        log.warning('Attendance database not found at %s', config.ATTENDANCE_DB_PATH)
+        return JSONResponse(
+            {'error': 'The attendance database has not been built yet.'},
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+
+
+@app.get('/attendance/summaries.json')
+async def attendance_summaries(request: Request, _: None = Depends(require_valid_cookie)):
+    """Serve the per-term summary-chart datasets (beginner intake, Level 2 + social, retention)."""
+    try:
+        return JSONResponse(analysis.summaries())
     except FileNotFoundError:
         log.warning('Attendance database not found at %s', config.ATTENDANCE_DB_PATH)
         return JSONResponse(

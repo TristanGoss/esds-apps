@@ -340,6 +340,28 @@ def test_download_qr_code_scans_csv(auth_client, monkeypatch):
     assert '2024-01-01' in response.text
 
 
+def test_attendance_summaries_ok(auth_client, monkeypatch):
+    payload = {'beginner_intake': [{'label': '24/25', 'points': []}], 'level2_socials': [], 'cohort_retention': {}}
+    monkeypatch.setattr('esds_apps.main.analysis.summaries', lambda: payload)
+    response = auth_client.get('/attendance/summaries.json')
+    assert response.status_code == HTTPStatus.OK
+    assert response.json() == payload
+
+
+def test_attendance_summaries_db_missing(auth_client, monkeypatch):
+    def _raise():
+        raise FileNotFoundError('no db')
+
+    monkeypatch.setattr('esds_apps.main.analysis.summaries', _raise)
+    response = auth_client.get('/attendance/summaries.json')
+    assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+    assert 'error' in response.json()
+
+
+def test_attendance_summaries_requires_auth(client):
+    assert client.get('/attendance/summaries.json').status_code == HTTPStatus.UNAUTHORIZED
+
+
 def test_health_endpoint(client):
     assert client.get('/health').status_code == HTTPStatus.OK
 

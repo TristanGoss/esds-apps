@@ -17,10 +17,9 @@
         <h1>Attendance over time</h1>
         <p>
             Every activity (an individual lesson or social) we hold a record for is one point below:
-            its date against the number of people. This is a high-detail view intended for debugging.
+            its date against the number of people. This is a high-detail view intended for data access.
             Drag to zoom, double-click to reset, hover a point for a summary, and click a point to
-            pin its full breakdown beneath the chart. Simpler per-term summaries will follow;
-            this one stays deliberately busy so software bugs are immediately obvious.
+            pin its full breakdown beneath the chart.
         </p>
         <p><strong>Reading the chart.</strong>
             <em>Colour</em> is the event type (course, social, workshop, weekender).
@@ -38,6 +37,46 @@
             <header><strong>Selected activity</strong></header>
             <div id="point-details-body"></div>
         </article>
+
+        <h2>Per-term summaries</h2>
+        <p>
+            The scatter above is the raw record; the three charts below summarise it by teaching
+            term to answer specific questions. Terms are derived from when each Level 1 course
+            block starts — and the academic year runs September to August, so "term 1" is the
+            first term after the summer break.
+        </p>
+        <div id="summary-status"></div>
+
+        <h3>How well attended are our Level 1 classes?</h3>
+        <p>
+            Mean Level 1 attendance per lesson, one line per academic year, against the term's
+            slot in the year. Comparing the same term across years shows whether the beginner
+            intake is growing or shrinking. Solid is attended (named attendees plus anonymous
+            door head-counts); dashed is everyone registered, whether or not we know they turned
+            up. The earliest years logged mostly enrolment rather than turnout, so the chart
+            starts at 2023/24.
+        </p>
+        <div id="beginner-intake-chart" style="width:100%;height:460px;"></div>
+
+        <h3>How well attended are our Level 2 classes and their post-class socials?</h3>
+        <p>
+            Mean Level 2 attendance per term (solid), one line per academic year, with the
+            social-only ticket purchases overlaid (dashed). Social-only tickets were introduced
+            in autumn 2024, so the dashed lines start at 2024/25.
+        </p>
+        <div id="level2-socials-chart" style="width:100%;height:460px;"></div>
+
+        <h3>Once someone joins, how long do they keep coming back?</h3>
+        <p>
+            Each row is the term a dancer first appeared; each column is the number of terms
+            later; the colour is the share of that joining cohort still active then. Reading down
+            a column shows whether newer intakes retain better than older ones; reading across a
+            row shows the shape of a cohort's drop-off after joining. The coloured strip on the
+            left marks the teaching team that ran each joining term, so retention can be read
+            against who taught that intake. Presence here means appearing on any sheet that term,
+            attended or not, because turnout was only recorded consistently from around 2024.
+        </p>
+        <div id="cohort-retention-chart" style="width:100%;height:680px;"></div>
 
         <h2>Frequently asked questions</h2>
 
@@ -137,6 +176,7 @@
     </main>
 
     <script src="/public/js/attendance.js"></script>
+    <script src="/public/js/attendance_summaries.js"></script>
 </body>
 
 </html>

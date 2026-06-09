@@ -1,0 +1,184 @@
+// Renders the three per-term summary charts on /attendance with Plotly, from the datasets
+// served by /attendance/summaries.json (built server-side in attendance/analysis.py, itself a
+// port of the matplotlib charts in working/attendance.ipynb). Three charts:
+//   1. beginner (Level 1) intake per term, one line per academic year (solid attended / dashed registered);
+//   2. Level 2 class attendance per term with the paired social-only turnout (solid / dashed);
+//   3. cohort-retention heatmap with a teaching-team strip down the joining-cohort axis.
+
+// Matplotlib's tab10, so a given academic year / team keeps the same colour as in the notebook.
+const TAB10 = [
+  '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+  '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+];
+
+// Matplotlib's YlGnBu, sampled light -> dark, so 0% retention reads as a gentle pale yellow and
+// 100% as a dark blue (less aggressive at zero than plasma was).
+const YLGNBU = [
+  [0.0, '#ffffd9'], [0.125, '#edf8b1'], [0.25, '#c7e9b4'], [0.375, '#7fcdbb'],
+  [0.5, '#41b6c4'], [0.625, '#1d91c0'], [0.75, '#225ea8'], [0.875, '#253494'], [1.0, '#081d58'],
+];
+
+const PLOT_CONFIG = { responsive: true, displaylogo: false };
+const GRID = { showgrid: true, gridcolor: '#e7e7e7' };
+
+// A grey, data-less line so the solid/dashed distinction gets its own legend entry alongside
+// the per-year colour entries (Plotly has only one legend, unlike the notebook's two).
+function styleStub(name, dash) {
+  return {
+    type: 'scatter', mode: 'lines', name, x: [null], y: [null],
+    line: { color: '#4d4d4d', dash }, hoverinfo: 'skip', legendgroup: 'style',
+    legendgrouptitle: dash === 'solid' ? { text: 'Line style' } : undefined,
+  };
+}
+
+// Charts 1 and 2 share a shape: per year a solid line (primary series) and an optional dashed
+// line (secondary series) in the same colour. solidKey/dashKey name the per-point fields.
+function yearLineTraces(years, pointsKey, dashPointsKey, solidLabel, dashLabel) {
+  const traces = [];
+  years.forEach((y, i) => {
+    const colour = TAB10[i % TAB10.length];
+    const solid = y[pointsKey];
+    traces.push({
+      type: 'scatter', mode: 'lines', name: y.label, legendgroup: 'year-' + i,
+      x: solid.map((p) => p.term_num), y: solid.map((p) => p.attended ?? p.value),
+      line: { color: colour, width: 2 },
+      hovertemplate: `${y.label} ${solidLabel}<br>term %{x}: %{y:.1f}<extra></extra>`,
+    });
+    const dashed = y[dashPointsKey];
+    if (dashed && dashed.length) {
+      traces.push({
+        type: 'scatter', mode: 'lines', name: y.label, legendgroup: 'year-' + i, showlegend: false,
+        x: dashed.map((p) => p.term_num), y: dashed.map((p) => p.registered ?? p.value),
+        line: { color: colour, width: 2, dash: 'dash' },
+        hovertemplate: `${y.label} ${dashLabel}<br>term %{x}: %{y:.1f}<extra></extra>`,
+      });
+    }
+  });
+  traces.push(styleStub(solidLabel, 'solid'));
+  traces.push(styleStub(dashLabel, 'dash'));
+  return traces;
+}
+
+function termAxis(years, pointsKeys) {
+  let maxTerm = 1;
+  years.forEach((y) => pointsKeys.forEach((k) => (y[k] || []).forEach((p) => {
+    if (p.term_num > maxTerm) maxTerm = p.term_num;
+  })));
+  return {
+    title: 'term number within academic year (1 = first after summer break)',
+    tickmode: 'array', tickvals: Array.from({ length: maxTerm }, (_, i) => i + 1),
+    ...GRID,
+  };
+}
+
+function renderBeginnerIntake(years) {
+  const traces = yearLineTraces(years, 'points', 'points', 'attended', 'registered');
+  const layout = {
+    title: 'Mean Level 1 attendance per lesson, by academic year',
+    xaxis: termAxis(years, ['points']),
+    yaxis: { title: 'mean Level 1 dancers per lesson', rangemode: 'tozero', ...GRID },
+    legend: { groupclick: 'toggleitem' }, hovermode: 'closest',
+    margin: { l: 60, r: 30, t: 50, b: 60 }, plot_bgcolor: 'white', paper_bgcolor: 'white',
+  };
+  Plotly.newPlot('beginner-intake-chart', traces, layout, PLOT_CONFIG);
+}
+
+function renderLevel2Socials(years) {
+  const traces = yearLineTraces(years, 'class_points', 'social_points', 'Level 2 class', 'social-only tickets');
+  const layout = {
+    title: 'Mean Level 2 and post-class social attendance per term, by academic year',
+    xaxis: termAxis(years, ['class_points', 'social_points']),
+    yaxis: { title: 'mean attendees per session', rangemode: 'tozero', ...GRID },
+    legend: { groupclick: 'toggleitem' }, hovermode: 'closest',
+    margin: { l: 60, r: 30, t: 50, b: 60 }, plot_bgcolor: 'white', paper_bgcolor: 'white',
+  };
+  Plotly.newPlot('level2-socials-chart', traces, layout, PLOT_CONFIG);
+}
+
+function teamColour(teacherId) {
+  return teacherId < 0 ? '#d9d9d9' : TAB10[teacherId % TAB10.length];
+}
+
+function renderCohortRetention(data) {
+  const terms = data.terms; // ordered by term idx
+  const n = terms.length;
+  const z = data.matrix; // z[cohort][offset], null where impossible / no cohort
+  const offsets = Array.from({ length: n }, (_, j) => j);
+  const yIdx = Array.from({ length: n }, (_, i) => i);
+  const labels = terms.map((t) => `${t.label}  (n=${t.total})`);
+
+  const heatmap = {
+    type: 'heatmap', x: offsets, y: yIdx, z, zmin: 0, zmax: 100,
+    colorscale: YLGNBU, hoverongaps: false,
+    colorbar: { title: { text: '% of cohort<br>still active', side: 'right' }, thickness: 14 },
+    customdata: terms.map((t) => t.label),
+    hovertemplate: 'joined %{customdata}<br>%{x} terms later<br>%{z:.0f}% still active<extra></extra>',
+  };
+
+  // Per-cell percentage labels, white on the dark (high) end and black on the light end, as in
+  // the notebook. Plotly heatmap text shares one font colour, so use per-cell annotations.
+  const annotations = [];
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      if (z[i][j] === null) continue;
+      annotations.push({
+        x: j, y: i, text: String(Math.round(z[i][j])), showarrow: false,
+        font: { size: 9, color: z[i][j] > 55 ? 'white' : 'black' },
+      });
+    }
+  }
+
+  // Teaching-team strip: a coloured rectangle per joining cohort, just left of the grid. Shapes
+  // give precise placement; Plotly can't render a categorical second colour-axis on a heatmap.
+  const shapes = [];
+  terms.forEach((t, i) => {
+    shapes.push({
+      type: 'rect', xref: 'x', yref: 'y', x0: -1.6, x1: -0.6, y0: i - 0.5, y1: i + 0.5,
+      fillcolor: teamColour(t.teacher_id), line: { width: 0 },
+    });
+  });
+
+  // Data-less square markers so each distinct teaching team gets a legend entry.
+  const teamLegend = data.teams.map((team) => ({
+    type: 'scatter', mode: 'markers', name: team.label, x: [null], y: [null],
+    marker: { size: 10, color: teamColour(team.id), symbol: 'square' }, hoverinfo: 'skip',
+  }));
+
+  const layout = {
+    title: 'Cohort retention: % of each joining term still active N terms later',
+    annotations, shapes,
+    xaxis: {
+      title: 'terms since joining', range: [-2, n - 0.5],
+      tickmode: 'array', tickvals: offsets, constrain: 'domain',
+    },
+    yaxis: {
+      autorange: 'reversed', // cohort 0 (earliest) at the top, as in the notebook
+      tickmode: 'array', tickvals: yIdx, ticktext: labels, tickfont: { size: 9 },
+    },
+    legend: { title: { text: 'Teaching team' }, orientation: 'h', y: -0.12, font: { size: 10 } },
+    margin: { l: 120, r: 20, t: 50, b: 90 }, plot_bgcolor: 'white', paper_bgcolor: 'white',
+  };
+  Plotly.newPlot('cohort-retention-chart', [heatmap, ...teamLegend], layout, PLOT_CONFIG);
+}
+
+async function renderSummaries() {
+  const status = document.getElementById('summary-status');
+  let payload;
+  try {
+    const resp = await fetch('/attendance/summaries.json', { credentials: 'same-origin' });
+    payload = await resp.json();
+    if (!resp.ok) {
+      status.innerHTML = `<p class="error">${payload.error || 'Could not load the per-term summaries.'}</p>`;
+      return;
+    }
+  } catch (e) {
+    status.innerHTML = '<p class="error">Could not load the per-term summaries.</p>';
+    return;
+  }
+
+  renderBeginnerIntake(payload.beginner_intake || []);
+  renderLevel2Socials(payload.level2_socials || []);
+  renderCohortRetention(payload.cohort_retention || { terms: [], matrix: [], teams: [] });
+}
+
+renderSummaries();
