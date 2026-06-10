@@ -161,6 +161,54 @@ function renderCohortRetention(data) {
   Plotly.newPlot('cohort-retention-chart', [heatmap, ...teamLegend], layout, PLOT_CONFIG);
 }
 
+// Community survival curve for 2026: dancers attending at least each share of the calendar, with
+// and without the 30th anniversary. Clicking a point downloads that group's pseudonymous DNC ids.
+function renderCommunity2026(data) {
+  const totalDates = data.total_dates || 0;
+  const series = [
+    { key: 'incl_30th', label: 'incl. 30th anniversary', colour: '#1f77b4', scope: 'incl' },
+    { key: 'excl_30th', label: 'excl. 30th anniversary', colour: '#d62728', scope: 'excl' },
+  ];
+  const traces = series.map((s) => {
+    const pts = data[s.key] || [];
+    return {
+      type: 'scatter', mode: 'lines+markers', name: s.label,
+      x: pts.map((p) => p.pct), y: pts.map((p) => p.dancers),
+      customdata: pts.map((p) => [s.scope, p.min_dates]),
+      marker: { size: 7, color: s.colour }, line: { color: s.colour, width: 2 },
+      hovertemplate:
+        `${s.label}<br>at least %{customdata[1]} dates (%{x:.0f}% of calendar)<br>` +
+        '%{y} dancers<br><i>click to download their ids</i><extra></extra>',
+    };
+  });
+
+  const layout = {
+    title: 'The 2026 community: how big is it, and how committed?',
+    xaxis: {
+      title: `share of the 2026 calendar attended (%) — ${totalDates} dates in all`,
+      range: [0, 100], tickmode: 'array', tickvals: Array.from({ length: 11 }, (_, i) => i * 10), ...GRID,
+    },
+    yaxis: { title: 'dancers attending at least this share', rangemode: 'tozero', ...GRID },
+    hovermode: 'closest', legend: { x: 0.5, y: 1, xanchor: 'center' },
+    margin: { l: 60, r: 30, t: 50, b: 60 }, plot_bgcolor: 'white', paper_bgcolor: 'white',
+  };
+
+  Plotly.newPlot('community-2026-chart', traces, layout, PLOT_CONFIG).then((gd) => {
+    gd.on('plotly_click', (ev) => {
+      const cd = ev.points[0].customdata;
+      if (!cd) return;
+      const [scope, minDates] = cd;
+      const dancers = ev.points[0].y;
+      const url = `/attendance/community/dancers.csv?scope=${scope}&min_dates=${minDates}`;
+      document.getElementById('community-details-body').innerHTML =
+        `<p>${dancers} dancers attended at least ${minDates} date(s) in 2026 ` +
+        `(${scope === 'incl' ? 'including' : 'excluding'} the 30th anniversary).<br>` +
+        `<a href="${url}" rel="noopener">Download their DNC ids (CSV)</a></p>`;
+      document.getElementById('community-details').hidden = false;
+    });
+  });
+}
+
 async function renderSummaries() {
   const status = document.getElementById('summary-status');
   let payload;
@@ -179,6 +227,7 @@ async function renderSummaries() {
   renderBeginnerIntake(payload.beginner_intake || []);
   renderLevel2Socials(payload.level2_socials || []);
   renderCohortRetention(payload.cohort_retention || { terms: [], matrix: [], teams: [] });
+  renderCommunity2026(payload.community_2026 || { total_dates: 0, incl_30th: [], excl_30th: [] });
 }
 
 renderSummaries();

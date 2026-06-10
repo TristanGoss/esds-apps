@@ -1,4 +1,5 @@
 import datetime
+import sqlite3
 
 import pytest
 
@@ -62,6 +63,18 @@ def built_db(tmp_path, monkeypatch):
     # 2025/26 term 1: d1 still active a year later, taught by team A again.
     _add_course(db, 'L1 Autumn 2025', 'Level 1', t3, 4, ['d1', 'd7', 'd8'], teachers=teachers_a, social_with=['d1'])
     _add_course(db, 'L2 Autumn 2025', 'Level 2', t3, 4, ['e1'])
+
+    # 2026: named Level 2 attendance begins, so the community chart has data. A spring L2 block
+    # (Level 2 doesn't anchor a term, so the term count is unchanged) plus the 30th anniversary
+    # weekender, so the 30th can be filtered out and incl/excl differ. f1 attends both, g1 only
+    # the anniversary, so excluding it drops g1 and one of f1's dates.
+    t4 = datetime.date(2026, 1, 13)
+    _add_course(db, 'L2 Spring 2026', 'Level 2', t4, 4, ['e1', 'f1', 'f2'])
+    anniv = db.upsert_event('30 Years of ESDS', EventType.WEEKENDER)
+    anniv_act = db.upsert_activity(anniv, '30th party', datetime.date(2026, 3, 20), ActivityType.SOCIAL, None)
+    for dancer in ('f1', 'g1'):
+        db.record_attendance(anniv_act, dancer, AttendanceStatus.ATTENDED)
+    db.record_count(anniv_act, None, 5)  # five anonymous door heads at the party
     db.close()
 
     monkeypatch.setattr(analysis.config, 'ATTENDANCE_DB_PATH', path)
@@ -70,7 +83,7 @@ def built_db(tmp_path, monkeypatch):
 
 def test_summaries_top_level_shape(built_db):
     s = analysis.summaries()
-    assert set(s) == {'beginner_intake', 'level2_socials', 'cohort_retention'}
+    assert set(s) == {'beginner_intake', 'level2_socials', 'cohort_retention', 'community_2026'}
 
 
 def test_beginner_intake_groups_by_year(built_db):
@@ -110,7 +123,60 @@ def test_cohort_retention_matrix_and_teams(built_db):
     assert 'AAAA1111+BBBB2222' in labels
 
 
+def test_community_2026_size_and_commitment(built_db):
+    c = analysis.summaries()['community_2026']
+    # 4 spring L2 dates + 1 anniversary date, the fixed denominator for both series.
+    assert c['total_dates'] == 5
+    incl, excl = c['incl_30th'], c['excl_30th']
+    # Survival counts are non-increasing as the threshold rises.
+    ys = [p['dancers'] for p in incl]
+    assert ys == sorted(ys, reverse=True)
+    # Leftmost point is the whole active community; the 30th adds g1 on top of e1/f1/f2.
+    assert incl[0]['dancers'] == 4
+    assert excl[0]['dancers'] == 3
+    # pct uses the fixed 5-date denominator: 1 date -> 20%.
+    assert incl[0]['pct'] == 20.0
+
+
+def test_community_2026_dancers_scope(built_db):
+    assert analysis.community_2026_dancers('incl', 1) == ['e1', 'f1', 'f2', 'g1']
+    assert analysis.community_2026_dancers('excl', 1) == ['e1', 'f1', 'f2']
+    # Only f1 reaches all five dates (four L2 + the anniversary).
+    assert analysis.community_2026_dancers('incl', 5) == ['f1']
+
+
+def test_activity_records(built_db):
+    conn = sqlite3.connect(built_db)
+    activity_id = conn.execute("SELECT activity_id FROM activity WHERE name = '30th party'").fetchone()[0]
+    conn.close()
+    rows = analysis.activity_records(activity_id)
+
+    named = [r for r in rows if r['record_type'] == 'named']
+    aggregate = [r for r in rows if r['record_type'] == 'aggregate']
+    assert sorted(r['dancer_id'] for r in named) == ['f1', 'g1']
+    assert all(r['status'] == 'attended' for r in named)
+    # The anonymous door head-count comes through as one aggregate row, no dancer attached.
+    assert len(aggregate) == 1
+    assert aggregate[0]['head_count'] == 5
+    assert aggregate[0]['dancer_id'] == ''
+    # Every row carries the parent event/activity context.
+    assert all(r['event_name'] == '30 Years of ESDS' for r in rows)
+    assert all(r['activity_name'] == '30th party' for r in rows)
+
+
+def test_activity_records_unknown_activity(built_db):
+    assert analysis.activity_records(99999) == []
+
+
 def test_summaries_missing_db_raises(tmp_path, monkeypatch):
     monkeypatch.setattr(analysis.config, 'ATTENDANCE_DB_PATH', tmp_path / 'nope.sqlite')
     with pytest.raises(FileNotFoundError):
         analysis.summaries()
+
+
+def test_community_and_activity_dancers_missing_db_raise(tmp_path, monkeypatch):
+    monkeypatch.setattr(analysis.config, 'ATTENDANCE_DB_PATH', tmp_path / 'nope.sqlite')
+    with pytest.raises(FileNotFoundError):
+        analysis.community_2026_dancers('incl', 1)
+    with pytest.raises(FileNotFoundError):
+        analysis.activity_records(1)

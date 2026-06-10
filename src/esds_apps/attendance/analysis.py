@@ -38,6 +38,9 @@ _FIRST_PAIRED_SOCIAL_ACAD_YEAR = 2024
 # Academic years run September -> August, so a date in this month or later belongs to the year
 # that's just starting (Sept 2024 -> the 2024/25 year; Jan 2025 -> still 2024/25).
 _ACADEMIC_YEAR_START_MONTH = 8
+# The community chart looks at 2026 only: that is when we began recording Level 2 attendees by
+# name (January 2026), so earlier years carry no improvers' names and would undercount the core.
+_FIRST_L2_NAMES_DATE = '2026-01-01'
 
 
 def _acad_year_label(acad_year: int) -> str:
@@ -232,11 +235,154 @@ def _cohort_retention(conn: sqlite3.Connection, terms: pd.DataFrame, assign) -> 
     return {'terms': term_meta, 'matrix': matrix, 'teams': teams}
 
 
+def _community_frame(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Named confirmed attendances since the Level 2 names began, one row per (dancer, date).
+
+    Flagged with ``is_30th`` so the 30th anniversary weekender can be filtered out. Shared by the
+    chart dataset and the CSV download so the two can't disagree about who is counted.
+    """
+    return pd.read_sql_query(
+        "SELECT DISTINCT at.dancer_id, a.date, (e.name LIKE '%30 Years%') AS is_30th "
+        'FROM attendance at JOIN activity a USING(activity_id) JOIN event e USING(event_id) '
+        "WHERE at.status = 'attended' AND a.date >= ?",
+        conn,
+        params=(_FIRST_L2_NAMES_DATE,),
+        parse_dates=['date'],
+    )
+
+
+def _community_2026(conn: sqlite3.Connection) -> dict:
+    """Plot 7: the 2026 survival curve — dancers attending at least each share of the calendar.
+
+    For each series (with and without the 30th anniversary) one point per distinct attendance
+    count: how many dancers reached that many unique dates, and that count as a share of the full
+    2026 calendar. The denominator is the full calendar for both series so the two are directly
+    comparable. ``min_dates`` is carried so a click can fetch exactly that point's dancers.
+    """
+    raw = _community_frame(conn)
+    total_dates = int(raw['date'].nunique())
+
+    def series(df: pd.DataFrame) -> list[dict]:
+        per_dancer = df.groupby('dancer_id')['date'].nunique()
+        if per_dancer.empty or total_dates == 0:
+            return []
+        return [
+            {
+                'min_dates': c,
+                'pct': round(c / total_dates * 100, 2),
+                'dancers': int((per_dancer >= c).sum()),
+            }
+            for c in range(1, int(per_dancer.max()) + 1)
+        ]
+
+    return {
+        'total_dates': total_dates,
+        'incl_30th': series(raw),
+        'excl_30th': series(raw[raw['is_30th'] == 0]),
+    }
+
+
+def community_2026_dancers(scope: str, min_dates: int) -> list[str]:
+    """DNC ids of dancers who attended at least ``min_dates`` unique dates in 2026.
+
+    ``scope`` is 'incl' or 'excl' for whether the 30th anniversary weekender counts. Backs the
+    click-to-download on the community chart. Raises FileNotFoundError if the database is absent.
+    """
+    if not Path(config.ATTENDANCE_DB_PATH).exists():
+        raise FileNotFoundError(config.ATTENDANCE_DB_PATH)
+    conn = sqlite3.connect(config.ATTENDANCE_DB_PATH)
+    try:
+        raw = _community_frame(conn)
+    finally:
+        conn.close()
+    if scope == 'excl':
+        raw = raw[raw['is_30th'] == 0]
+    per_dancer = raw.groupby('dancer_id')['date'].nunique()
+    return sorted(per_dancer[per_dancer >= min_dates].index.tolist())
+
+
+# The CSV columns for one activity's full record: event/activity context repeated on every row,
+# then the record itself. Named per-person rows fill dancer_id/status; anonymous aggregate
+# head-count rows fill head_count instead. Shared with main.py so the header can't drift.
+ACTIVITY_RECORD_FIELDS = [
+    'event_name',
+    'event_type',
+    'venue',
+    'activity_name',
+    'activity_type',
+    'difficulty',
+    'date',
+    'record_type',
+    'dancer_id',
+    'status',
+    'ticket_type',
+    'head_count',
+]
+
+
+def activity_records(activity_id: int) -> list[dict]:
+    """Every attendance record for one activity, with its parent event/activity context.
+
+    One row per named attendee (dancer_id + status) and one per anonymous aggregate head-count
+    (head_count, no dancer), each carrying the event and activity it belongs to. Backs the
+    click-to-download on the all-activities scatter. Returns an empty list for an unknown
+    activity; raises FileNotFoundError if the database is absent.
+    """
+    if not Path(config.ATTENDANCE_DB_PATH).exists():
+        raise FileNotFoundError(config.ATTENDANCE_DB_PATH)
+    conn = sqlite3.connect(config.ATTENDANCE_DB_PATH)
+    conn.row_factory = sqlite3.Row
+    try:
+        context = conn.execute(
+            'SELECT e.name AS event_name, e.event_type, e.venue, '
+            'a.name AS activity_name, a.activity_type, a.difficulty, a.date '
+            'FROM activity a JOIN event e USING(event_id) WHERE a.activity_id = ?',
+            (activity_id,),
+        ).fetchone()
+        if context is None:
+            return []
+        named = conn.execute(
+            'SELECT dancer_id, status, ticket_type FROM attendance WHERE activity_id = ? ORDER BY dancer_id',
+            (activity_id,),
+        ).fetchall()
+        aggregate = conn.execute(
+            'SELECT ticket_type, head_count FROM attendance_count WHERE activity_id = ? ORDER BY ticket_type',
+            (activity_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    ctx = dict(context)
+    rows = [
+        {
+            **ctx,
+            'record_type': 'named',
+            'dancer_id': r['dancer_id'],
+            'status': r['status'],
+            'ticket_type': r['ticket_type'],
+            'head_count': '',
+        }
+        for r in named
+    ]
+    rows += [
+        {
+            **ctx,
+            'record_type': 'aggregate',
+            'dancer_id': '',
+            'status': '',
+            'ticket_type': r['ticket_type'],
+            'head_count': r['head_count'],
+        }
+        for r in aggregate
+    ]
+    return rows
+
+
 def summaries() -> dict:
-    """Build all three /attendance summary-chart datasets from the deployed attendance database.
+    """Build the /attendance summary-chart datasets from the deployed attendance database.
 
     Raises FileNotFoundError if that database hasn't been built. The term calendar is derived
-    once and shared by the three builders.
+    once and shared by the builders that bucket by term.
     """
     if not Path(config.ATTENDANCE_DB_PATH).exists():
         raise FileNotFoundError(config.ATTENDANCE_DB_PATH)
@@ -248,6 +394,7 @@ def summaries() -> dict:
             'beginner_intake': _beginner_intake(conn, terms, assign),
             'level2_socials': _level2_and_socials(conn, terms, assign),
             'cohort_retention': _cohort_retention(conn, terms, assign),
+            'community_2026': _community_2026(conn),
         }
     finally:
         conn.close()

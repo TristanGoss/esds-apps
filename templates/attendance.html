@@ -19,7 +19,9 @@
             Every activity (an individual lesson or social) we hold a record for is one point below:
             its date against the number of people. This is a high-detail view intended for data access.
             Drag to zoom, double-click to reset, hover a point for a summary, and click a point to
-            pin its full breakdown beneath the chart.
+            pin its full breakdown beneath the chart — including a link to download that activity's
+            complete record (named attendees as pseudonymous DNC ids, anonymous head-counts, and the
+            parent event details) as a CSV.
         </p>
         <p><strong>Reading the chart.</strong>
             <em>Colour</em> is the event type (course, social, workshop, weekender).
@@ -77,6 +79,31 @@
             attended or not, because turnout was only recorded consistently from around 2024.
         </p>
         <div id="cohort-retention-chart" style="width:100%;height:680px;"></div>
+
+        <h2>How big is our community, and how committed?</h2>
+        <p>
+            For everyone who turned up at least once in 2026, this counts the unique dates they came
+            to as a share of the whole 2026 calendar, then plots how many dancers attended at least
+            that share. The leftmost point is the <strong>size</strong> of the active community
+            (everyone who came at all); how steeply the line falls is its
+            <strong>commitment</strong> — whether attendance concentrates in a regular core or
+            spreads across many occasional visitors. The two lines show the effect of the 30th
+            anniversary weekender, which draws a crowd who largely don't appear otherwise, so the
+            lower line, with it removed, is the underlying regular community. Both lines use the same
+            fixed calendar, so the gap between them is the anniversary's contribution.
+        </p>
+        <p>
+            We show 2026 only because that is when we began recording Level 2 attendees by name (in
+            January 2026); before then the improvers' classes carry no names, so earlier years would
+            undercount the committed core. <strong>Click any point</strong> to download the
+            pseudonymous DNC ids of the dancers it counts, as a CSV.
+        </p>
+        <div id="community-2026-chart" style="width:100%;height:520px;"></div>
+
+        <article id="community-details" hidden>
+            <header><strong>Selected group</strong></header>
+            <div id="community-details-body"></div>
+        </article>
 
         <h2>Frequently asked questions</h2>
 

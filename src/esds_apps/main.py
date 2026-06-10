@@ -85,7 +85,8 @@ def _attendance_activity_rows() -> list[dict]:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             """
-            SELECT av.date,
+            SELECT av.activity_id,
+                   av.date,
                    e.name   AS event_name,
                    av.event_type,
                    act.name AS activity_name,
@@ -181,6 +182,67 @@ async def attendance_summaries(request: Request, _: None = Depends(require_valid
             {'error': 'The attendance database has not been built yet.'},
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
         )
+
+
+@app.get('/attendance/activity/{activity_id}/records.csv', response_class=StreamingResponse)
+async def attendance_activity_records(request: Request, activity_id: int, _: None = Depends(require_valid_cookie)):
+    """Download every record for one activity: named attendees, anonymous head-counts, and context.
+
+    Backs the click-to-download on the all-activities scatter. Guarded by the cookie dependency so
+    an unauthenticated request gets a clean 401 rather than a redirect into Google's OAuth flow.
+    """
+    try:
+        rows = analysis.activity_records(activity_id)
+    except FileNotFoundError:
+        log.warning('Attendance database not found at %s', config.ATTENDANCE_DB_PATH)
+        return JSONResponse(
+            {'error': 'The attendance database has not been built yet.'},
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+
+    buffer = io.StringIO()
+    writer = csv.DictWriter(buffer, fieldnames=analysis.ACTIVITY_RECORD_FIELDS)
+    writer.writeheader()
+    writer.writerows(rows)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type='text/csv',
+        headers={'Content-Disposition': f'attachment; filename="activity_{activity_id}_attendance.csv"'},
+    )
+
+
+@app.get('/attendance/community/dancers.csv', response_class=StreamingResponse)
+async def attendance_community_dancers(
+    request: Request,
+    scope: str = Query(pattern='^(incl|excl)$'),
+    min_dates: int = Query(ge=1),
+    _: None = Depends(require_valid_cookie),
+):
+    """Download the DNC ids of dancers who attended at least ``min_dates`` unique dates in 2026.
+
+    ``scope`` is 'incl' or 'excl' for whether the 30th anniversary weekender counts. Backs the
+    click-to-download on the community chart.
+    """
+    try:
+        ids = analysis.community_2026_dancers(scope, min_dates)
+    except FileNotFoundError:
+        log.warning('Attendance database not found at %s', config.ATTENDANCE_DB_PATH)
+        return JSONResponse(
+            {'error': 'The attendance database has not been built yet.'},
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(['dancer_id'])
+    writer.writerows([[i] for i in ids])
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type='text/csv',
+        headers={'Content-Disposition': f'attachment; filename="community_2026_{scope}_30th_min{min_dates}_dates.csv"'},
+    )
 
 
 @app.api_route('/health', methods=['GET', 'HEAD'])

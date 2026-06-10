@@ -362,6 +362,66 @@ def test_attendance_summaries_requires_auth(client):
     assert client.get('/attendance/summaries.json').status_code == HTTPStatus.UNAUTHORIZED
 
 
+def test_attendance_activity_records_csv(auth_client, monkeypatch):
+    from esds_apps.attendance.analysis import ACTIVITY_RECORD_FIELDS
+
+    def fake(activity_id):
+        ctx = {k: '' for k in ACTIVITY_RECORD_FIELDS}
+        ctx.update(event_name='30 Years', activity_name='party', date='2026-03-20')
+        return [
+            {**ctx, 'record_type': 'named', 'dancer_id': 'DNC-AAAA1111', 'status': 'attended'},
+            {**ctx, 'record_type': 'aggregate', 'head_count': 5},
+        ]
+
+    monkeypatch.setattr('esds_apps.main.analysis.activity_records', fake)
+    response = auth_client.get('/attendance/activity/7/records.csv')
+    assert response.status_code == HTTPStatus.OK
+    assert 'attachment; filename="activity_7_attendance.csv"' in response.headers['content-disposition']
+    assert ','.join(ACTIVITY_RECORD_FIELDS) in response.text
+    assert 'DNC-AAAA1111' in response.text
+    assert 'aggregate' in response.text
+
+
+def test_attendance_activity_records_db_missing(auth_client, monkeypatch):
+    def _raise(activity_id):
+        raise FileNotFoundError('no db')
+
+    monkeypatch.setattr('esds_apps.main.analysis.activity_records', _raise)
+    response = auth_client.get('/attendance/activity/7/records.csv')
+    assert response.status_code == HTTPStatus.SERVICE_UNAVAILABLE
+    assert 'error' in response.json()
+
+
+def test_attendance_activity_records_requires_auth(client):
+    assert client.get('/attendance/activity/7/records.csv').status_code == HTTPStatus.UNAUTHORIZED
+
+
+def test_attendance_community_dancers_csv(auth_client, monkeypatch):
+    captured = {}
+
+    def fake(scope, min_dates):
+        captured['args'] = (scope, min_dates)
+        return ['DNC-AAAA1111', 'DNC-BBBB2222']
+
+    monkeypatch.setattr('esds_apps.main.analysis.community_2026_dancers', fake)
+    response = auth_client.get('/attendance/community/dancers.csv?scope=excl&min_dates=3')
+    assert response.status_code == HTTPStatus.OK
+    assert captured['args'] == ('excl', 3)
+    assert 'community_2026_excl_30th_min3_dates.csv' in response.headers['content-disposition']
+    assert 'dancer_id' in response.text
+    assert 'DNC-BBBB2222' in response.text
+
+
+def test_attendance_community_dancers_rejects_bad_scope(auth_client):
+    response = auth_client.get('/attendance/community/dancers.csv?scope=nonsense&min_dates=1')
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_attendance_community_dancers_requires_auth(client):
+    response = client.get('/attendance/community/dancers.csv?scope=incl&min_dates=1')
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+
 def test_health_endpoint(client):
     assert client.get('/health').status_code == HTTPStatus.OK
 

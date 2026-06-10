@@ -41,6 +41,7 @@ function dataTraces(rows) {
   const customdata = (r) => [
     r.event_name, r.activity_name, r.event_type, difficultyOf(r),
     r.named_total, r.aggregate_total, r.total, r.named_registered, r.named_unknown,
+    r.activity_id,
   ];
 
   const attendedTrace = {
@@ -133,7 +134,7 @@ function legendTraces(rows) {
 function showDetails(point) {
   const cd = point.customdata;
   if (!cd) return;
-  const [eventName, activityName, eventType, difficulty, named, agg, total, registered, unknown] = cd;
+  const [eventName, activityName, eventType, difficulty, named, agg, total, registered, unknown, activityId] = cd;
   document.getElementById('point-details-body').innerHTML = `
     <p><strong>${eventName}</strong> — ${activityName} (${eventType}, ${difficulty})<br>
     ${point.x}</p>
@@ -141,7 +142,8 @@ function showDetails(point) {
       Attended: <strong>${total}</strong> (${named} named + ${agg} anonymous door)<br>
       Registered (named): <strong>${registered}</strong><br>
       Turnout unknown: <strong>${unknown}</strong>
-    </p>`;
+    </p>
+    <p><a href="/attendance/activity/${activityId}/records.csv" rel="noopener">Download full attendance record (CSV)</a></p>`;
   document.getElementById('point-details').hidden = false;
 }
 
