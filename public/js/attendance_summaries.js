@@ -204,8 +204,8 @@ function renderCommunity2026(data) {
       const url = `/attendance/community/dancers.csv?scope=${scope}&min_dates=${minDates}`;
       document.getElementById('community-details-body').innerHTML =
         `<p>${dancers} dancers attended at least ${minDates} date(s) in 2026 ` +
-        `(${scope === 'incl' ? 'including' : 'excluding'} the 30th anniversary).<br>` +
-        `<a href="${url}" rel="noopener">Download their DNC ids (CSV)</a></p>`;
+        `(${scope === 'incl' ? 'including' : 'excluding'} the 30th anniversary, excluding Volunteers and the Committee).<br>` +
+        `<a href="${url}" rel="noopener">Download their pseudonyms (CSV)</a></p>`;
       document.getElementById('community-details').hidden = false;
     });
   });
