@@ -111,7 +111,9 @@ function renderCohortRetention(data) {
     type: 'heatmap', x: offsets, y: yIdx, z, zmin: 0, zmax: 100,
     colorscale: YLGNBU, hoverongaps: false,
     colorbar: { title: { text: '% of cohort<br>still active', side: 'right' }, thickness: 14 },
-    customdata: terms.map((t) => t.label),
+    // customdata must match the z grid (rows x cols) for per-cell hover; carry the cohort label
+    // across every cell in its row. A 1D array isn't mapped to cells, so %{customdata} stays literal.
+    customdata: z.map((row, i) => row.map(() => terms[i].label)),
     hovertemplate: 'joined %{customdata}<br>%{x} terms later<br>%{z:.0f}% still active<extra></extra>',
   };
 
@@ -162,7 +164,7 @@ function renderCohortRetention(data) {
 }
 
 // Community survival curve for 2026: dancers attending at least each share of the calendar, with
-// and without the 30th anniversary. Clicking a point downloads that group's pseudonymous DNC ids.
+// and without the 30th anniversary. Clicking a point downloads that group's DNC ids.
 function renderCommunity2026(data) {
   const totalDates = data.total_dates || 0;
   const series = [
@@ -189,7 +191,7 @@ function renderCommunity2026(data) {
       range: [0, 100], tickmode: 'array', tickvals: Array.from({ length: 11 }, (_, i) => i * 10), ...GRID,
     },
     yaxis: { title: 'dancers attending at least this share', rangemode: 'tozero', ...GRID },
-    hovermode: 'closest', legend: { x: 0.5, y: 1, xanchor: 'center' },
+    hovermode: 'closest', legend: { x: 0.98, y: 0.98, xanchor: 'right', yanchor: 'top' },
     margin: { l: 60, r: 30, t: 50, b: 60 }, plot_bgcolor: 'white', paper_bgcolor: 'white',
   };
 
