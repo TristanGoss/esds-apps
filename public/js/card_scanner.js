@@ -1,5 +1,5 @@
 
-const allDiv = document.getElementById("all");
+const allDiv = document.body;
 const resultDiv = document.getElementById("result");
 const scanner = new Html5Qrcode("qr-reader");
 const sounds = {
@@ -74,7 +74,11 @@ async function validateCard(data) {
   try {
     const res = await fetch(`/proxy-card-check?url=${encodeURIComponent(data)}`);
     const text = await res.text();
-    const valid = text.includes("This membership card is valid");
+    // Dancecloud serves the check page as an Inertia.js SPA: the card status is
+    // embedded as JSON in the data-page attribute of #app, not as visible prose.
+    const doc = new DOMParser().parseFromString(text, "text/html");
+    const page = JSON.parse(doc.getElementById("app").dataset.page);
+    const valid = page.props.check.status === "valid";
     showResult(valid ? "✅ CARD VALID" : "❌ CARD INVALID", valid);
   } catch (err) {
     showResult("❌ FAILED TO VALIDATE", false);

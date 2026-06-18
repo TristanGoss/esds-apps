@@ -317,7 +317,7 @@ async def proxy_card_check(url: str):
     Used together with the /membership-cards/scanner route.
     """
     if url.startswith(config.DC_HOST):
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(follow_redirects=True) as client:
             resp = await client.get(url)
         return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get('content-type'))
     else:
