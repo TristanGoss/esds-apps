@@ -229,10 +229,12 @@ def _cohort_retention(conn: sqlite3.Connection, terms: pd.DataFrame, assign) -> 
     for r in terms.itertuples():
         if r.teacher_id not in seen:
             seen.add(r.teacher_id)
-            teams.append({'id': int(r.teacher_id), 'label': r.teacher_label})
+            teams.append({'id': int(r.teacher_id), 'label': r.teacher_label, 'ids': sorted(r.teacher_set)})
     teams.sort(key=lambda t: t['id'])
 
-    return {'terms': term_meta, 'matrix': matrix, 'teams': teams}
+    teacher_enc = _enc_names(conn, sorted({i for t in teams for i in t['ids']}))
+
+    return {'terms': term_meta, 'matrix': matrix, 'teams': teams, 'teacher_enc': teacher_enc}
 
 
 def _community_frame(conn: sqlite3.Connection) -> pd.DataFrame:
@@ -282,28 +284,63 @@ def _community_2026(conn: sqlite3.Connection) -> dict:
     }
 
 
-def community_2026_dancers(scope: str, min_dates: int) -> list[str]:
-    """DNC ids of dancers who attended at least ``min_dates`` unique dates in 2026.
+def community_2026_dancer_rows(scope: str, min_dates: int) -> list[dict]:
+    """(dancer_id, enc_name) for dancers who attended at least ``min_dates`` unique dates in 2026.
 
-    ``scope`` is 'incl' or 'excl' for whether the 30th anniversary weekender counts. Backs the
-    click-to-download on the community chart. Raises FileNotFoundError if the database is absent.
+    ``scope`` is 'incl' or 'excl' for whether the 30th anniversary weekender counts. ``enc_name``
+    is the Fernet ciphertext of the dancer's name (or None if no name is on file); the browser
+    decrypts it so the server never emits plaintext. Backs the click-to-download on the community
+    chart. Raises FileNotFoundError if the database is absent.
     """
     if not Path(config.ATTENDANCE_DB_PATH).exists():
         raise FileNotFoundError(config.ATTENDANCE_DB_PATH)
     conn = sqlite3.connect(config.ATTENDANCE_DB_PATH)
     try:
         raw = _community_frame(conn)
+        if scope == 'excl':
+            raw = raw[raw['is_30th'] == 0]
+        per_dancer = raw.groupby('dancer_id')['date'].nunique()
+        ids = sorted(per_dancer[per_dancer >= min_dates].index.tolist())
+        enc = _enc_names(conn, ids)
     finally:
         conn.close()
-    if scope == 'excl':
-        raw = raw[raw['is_30th'] == 0]
-    per_dancer = raw.groupby('dancer_id')['date'].nunique()
-    return sorted(per_dancer[per_dancer >= min_dates].index.tolist())
+    return [{'dancer_id': i, 'enc_name': enc.get(i)} for i in ids]
 
 
-# The CSV columns for one activity's full record: event/activity context repeated on every row,
-# then the record itself. Named per-person rows fill dancer_id/status; anonymous aggregate
-# head-count rows fill head_count instead. Shared with main.py so the header can't drift.
+def _enc_names(conn: sqlite3.Connection, dancer_ids: list[str]) -> dict[str, str | None]:
+    """Map each dancer_id to its enc_name ciphertext (absent ids and null names simply don't appear)."""
+    if not dancer_ids:
+        return {}
+    placeholders = ','.join('?' * len(dancer_ids))
+    rows = conn.execute(
+        f'SELECT dancer_id, enc_name FROM dancer WHERE dancer_id IN ({placeholders})', dancer_ids
+    ).fetchall()
+    return {d: e for d, e in rows}
+
+
+def decrypt_params() -> dict:
+    """The non-secret parameters the browser needs to derive the decryption key and check the passphrase.
+
+    ``salt`` (hex) feeds PBKDF2-SHA256 (480k iterations) to reproduce the Fernet key from the
+    operator's passphrase; ``sentinel`` is a token the browser decrypts to confirm the passphrase
+    is right before doing any real work. Neither is secret — the passphrase and the derived key
+    never leave the browser. Raises FileNotFoundError if the database is absent.
+    """
+    if not Path(config.ATTENDANCE_DB_PATH).exists():
+        raise FileNotFoundError(config.ATTENDANCE_DB_PATH)
+    conn = sqlite3.connect(config.ATTENDANCE_DB_PATH)
+    try:
+        rows = dict(conn.execute("SELECT key, value FROM meta WHERE key IN ('salt', 'sentinel')").fetchall())
+    finally:
+        conn.close()
+    return {'salt': rows.get('salt'), 'sentinel': rows.get('sentinel')}
+
+
+# The fields on each activity-record row: event/activity context repeated on every row, then the
+# record itself. Named per-person rows fill dancer_id/status; anonymous aggregate head-count rows
+# fill head_count instead. The rows also carry an ``enc_name`` ciphertext (not listed here): the
+# browser decrypts it and writes the CSV, inserting first_name/last_name columns, so plaintext
+# names are never assembled server-side.
 ACTIVITY_RECORD_FIELDS = [
     'event_name',
     'event_type',
@@ -323,10 +360,11 @@ ACTIVITY_RECORD_FIELDS = [
 def activity_records(activity_id: int) -> list[dict]:
     """Every attendance record for one activity, with its parent event/activity context.
 
-    One row per named attendee (dancer_id + status) and one per anonymous aggregate head-count
-    (head_count, no dancer), each carrying the event and activity it belongs to. Backs the
-    click-to-download on the all-activities scatter. Returns an empty list for an unknown
-    activity; raises FileNotFoundError if the database is absent.
+    One row per named attendee (dancer_id + status, plus the ``enc_name`` ciphertext the browser
+    decrypts to first/last name) and one per anonymous aggregate head-count (head_count, no
+    dancer), each carrying the event and activity it belongs to. Backs the click-to-download on
+    the all-activities scatter. Returns an empty list for an unknown activity; raises
+    FileNotFoundError if the database is absent.
     """
     if not Path(config.ATTENDANCE_DB_PATH).exists():
         raise FileNotFoundError(config.ATTENDANCE_DB_PATH)
@@ -342,7 +380,9 @@ def activity_records(activity_id: int) -> list[dict]:
         if context is None:
             return []
         named = conn.execute(
-            'SELECT dancer_id, status, ticket_type FROM attendance WHERE activity_id = ? ORDER BY dancer_id',
+            'SELECT at.dancer_id, at.status, at.ticket_type, d.enc_name '
+            'FROM attendance at LEFT JOIN dancer d ON d.dancer_id = at.dancer_id '
+            'WHERE at.activity_id = ? ORDER BY at.dancer_id',
             (activity_id,),
         ).fetchall()
         aggregate = conn.execute(
@@ -361,6 +401,7 @@ def activity_records(activity_id: int) -> list[dict]:
             'status': r['status'],
             'ticket_type': r['ticket_type'],
             'head_count': '',
+            'enc_name': r['enc_name'],
         }
         for r in named
     ]
@@ -372,6 +413,7 @@ def activity_records(activity_id: int) -> list[dict]:
             'status': '',
             'ticket_type': r['ticket_type'],
             'head_count': r['head_count'],
+            'enc_name': None,
         }
         for r in aggregate
     ]

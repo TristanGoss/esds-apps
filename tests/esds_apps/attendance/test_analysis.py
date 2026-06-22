@@ -138,11 +138,17 @@ def test_community_2026_size_and_commitment(built_db):
     assert incl[0]['pct'] == 20.0
 
 
+def _ids(rows):
+    return [r['dancer_id'] for r in rows]
+
+
 def test_community_2026_dancers_scope(built_db):
-    assert analysis.community_2026_dancers('incl', 1) == ['e1', 'f1', 'f2', 'g1']
-    assert analysis.community_2026_dancers('excl', 1) == ['e1', 'f1', 'f2']
+    assert _ids(analysis.community_2026_dancer_rows('incl', 1)) == ['e1', 'f1', 'f2', 'g1']
+    assert _ids(analysis.community_2026_dancer_rows('excl', 1)) == ['e1', 'f1', 'f2']
     # Only f1 reaches all five dates (four L2 + the anniversary).
-    assert analysis.community_2026_dancers('incl', 5) == ['f1']
+    assert _ids(analysis.community_2026_dancer_rows('incl', 5)) == ['f1']
+    # Each row carries an enc_name slot (None here: this fixture seeds no encrypted identities).
+    assert all('enc_name' in r for r in analysis.community_2026_dancer_rows('incl', 1))
 
 
 def test_activity_records(built_db):
@@ -159,9 +165,11 @@ def test_activity_records(built_db):
     assert len(aggregate) == 1
     assert aggregate[0]['head_count'] == 5
     assert aggregate[0]['dancer_id'] == ''
-    # Every row carries the parent event/activity context.
+    # Every row carries the parent event/activity context, plus an enc_name slot for the browser
+    # to decrypt (None here: this fixture seeds no encrypted identities).
     assert all(r['event_name'] == '30 Years of ESDS' for r in rows)
     assert all(r['activity_name'] == '30th party' for r in rows)
+    assert all('enc_name' in r for r in rows)
 
 
 def test_activity_records_unknown_activity(built_db):
@@ -177,6 +185,24 @@ def test_summaries_missing_db_raises(tmp_path, monkeypatch):
 def test_community_and_activity_dancers_missing_db_raise(tmp_path, monkeypatch):
     monkeypatch.setattr(analysis.config, 'ATTENDANCE_DB_PATH', tmp_path / 'nope.sqlite')
     with pytest.raises(FileNotFoundError):
-        analysis.community_2026_dancers('incl', 1)
+        analysis.community_2026_dancer_rows('incl', 1)
     with pytest.raises(FileNotFoundError):
         analysis.activity_records(1)
+    with pytest.raises(FileNotFoundError):
+        analysis.decrypt_params()
+
+
+def test_cohort_retention_exposes_teacher_ciphertext(built_db):
+    cr = analysis.summaries()['cohort_retention']
+    # Each team carries the dancer ids of its teachers, for the browser to relabel the legend.
+    team_a = next(t for t in cr['teams'] if t['label'] == 'AAAA1111+BBBB2222')
+    assert team_a['ids'] == ['DNC-AAAA1111', 'DNC-BBBB2222']
+    # teacher_enc maps every teacher id present; this fixture seeds no ciphertext, so it's empty.
+    assert isinstance(cr['teacher_enc'], dict)
+
+
+def test_decrypt_params_shape(built_db):
+    # The attendance DB carries the meta keys; this fixture (built without the pseudonymiser) leaves
+    # them unset, so the values are None but the keys are always present.
+    params = analysis.decrypt_params()
+    assert set(params) == {'salt', 'sentinel'}

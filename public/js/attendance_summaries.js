@@ -99,7 +99,40 @@ function teamColour(teacherId) {
   return teacherId < 0 ? '#d9d9d9' : TAB10[teacherId % TAB10.length];
 }
 
-function renderCohortRetention(data) {
+// Last-rendered datasets, kept so we can re-render in place when names are unlocked or re-locked.
+let retentionData = null;
+let communitySelection = null; // { scope, minDates, dancers } of the clicked community point
+
+// team.id -> legend label. Locked (or no passphrase yet): the stripped DNC- codes the server sent.
+// Unlocked: each team's teachers decrypted to first names, locally. Async because decryption is.
+async function teamLabelMap(data) {
+  const encByDancer = data.teacher_enc || {};
+  const unlocked = AttendanceCrypto.isUnlocked();
+  const map = {};
+  for (const team of data.teams) {
+    if (unlocked && team.ids && team.ids.length) {
+      const firsts = [];
+      for (const id of team.ids) {
+        let name = null;
+        try {
+          name = await AttendanceCrypto.decryptName(encByDancer[id]);
+        } catch (e) {
+          name = null; // a teacher with no name on file falls back to the id code
+        }
+        firsts.push((name && name.first_name) || id.replace('DNC-', ''));
+      }
+      firsts.sort();
+      map[team.id] = firsts.join('+');
+    } else {
+      map[team.id] = team.label;
+    }
+  }
+  return map;
+}
+
+async function renderCohortRetention(data) {
+  retentionData = data;
+  const labelMap = await teamLabelMap(data);
   const terms = data.terms; // ordered by term idx
   const n = terms.length;
   const z = data.matrix; // z[cohort][offset], null where impossible / no cohort
@@ -142,7 +175,7 @@ function renderCohortRetention(data) {
 
   // Data-less square markers so each distinct teaching team gets a legend entry.
   const teamLegend = data.teams.map((team) => ({
-    type: 'scatter', mode: 'markers', name: team.label, x: [null], y: [null],
+    type: 'scatter', mode: 'markers', name: labelMap[team.id], x: [null], y: [null],
     marker: { size: 10, color: teamColour(team.id), symbol: 'square' }, hoverinfo: 'skip',
   }));
 
@@ -200,15 +233,58 @@ function renderCommunity2026(data) {
       const cd = ev.points[0].customdata;
       if (!cd) return;
       const [scope, minDates] = cd;
-      const dancers = ev.points[0].y;
-      const url = `/attendance/community/dancers.csv?scope=${scope}&min_dates=${minDates}`;
-      document.getElementById('community-details-body').innerHTML =
-        `<p>${dancers} dancers attended at least ${minDates} date(s) in 2026 ` +
-        `(${scope === 'incl' ? 'including' : 'excluding'} the 30th anniversary, excluding Volunteers and the Committee).<br>` +
-        `<a href="${url}" rel="noopener">Download their pseudonyms (CSV)</a></p>`;
-      document.getElementById('community-details').hidden = false;
+      communitySelection = { scope, minDates, dancers: ev.points[0].y };
+      renderCommunityPanel();
     });
   });
+}
+
+// Render the pinned community-download panel for the currently-selected point. Locked: a hint to
+// enter the passphrase. Unlocked: a button that fetches the ciphertext, decrypts names in the
+// browser, and downloads the CSV.
+function renderCommunityPanel() {
+  if (!communitySelection) return;
+  const { scope, minDates, dancers } = communitySelection;
+  const body = document.getElementById('community-details-body');
+  const where = scope === 'incl' ? 'including' : 'excluding';
+  const lead =
+    `<p>${dancers} dancers attended at least ${minDates} date(s) in 2026 ` +
+    `(${where} the 30th anniversary, and excluding Volunteers and the Committee).`;
+
+  if (AttendanceCrypto.isUnlocked()) {
+    body.innerHTML = lead + '<br><button type="button" id="community-download-btn">Download with names (CSV)</button></p>';
+    document.getElementById('community-download-btn').addEventListener('click', (ev) => {
+      downloadCommunity(scope, minDates, ev.currentTarget);
+    });
+  } else {
+    body.innerHTML =
+      lead + '<br><em>Enter the passphrase at the top of the page to download these dancers with their names.</em></p>';
+  }
+  document.getElementById('community-details').hidden = false;
+}
+
+async function downloadCommunity(scope, minDates, btn) {
+  btn.setAttribute('aria-busy', 'true');
+  try {
+    const url = `/attendance/community/dancers.json?scope=${scope}&min_dates=${minDates}`;
+    const resp = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+    const payload = await resp.json();
+    if (!resp.ok) throw new Error(payload.error || 'Could not load the dancer list.');
+    const rows = [];
+    for (const d of payload.dancers) {
+      const name = await AttendanceCrypto.decryptName(d.enc_name);
+      rows.push([d.dancer_id, (name && name.first_name) || '', (name && name.last_name) || '']);
+    }
+    AttendanceCrypto.downloadCsv(
+      `community_2026_${scope}_30th_min${minDates}_dates.csv`,
+      ['dancer_id', 'first_name', 'last_name'],
+      rows
+    );
+  } catch (e) {
+    alert('Download failed: ' + e.message);
+  } finally {
+    btn.removeAttribute('aria-busy');
+  }
 }
 
 async function renderSummaries() {
@@ -228,8 +304,15 @@ async function renderSummaries() {
 
   renderBeginnerIntake(payload.beginner_intake || []);
   renderLevel2Socials(payload.level2_socials || []);
-  renderCohortRetention(payload.cohort_retention || { terms: [], matrix: [], teams: [] });
+  await renderCohortRetention(payload.cohort_retention || { terms: [], matrix: [], teams: [], teacher_enc: {} });
   renderCommunity2026(payload.community_2026 || { total_dates: 0, incl_30th: [], excl_30th: [] });
+
+  // When names are unlocked or re-locked, retranslate the retention legend and refresh the
+  // community download panel (the scatter download handles itself in attendance.js).
+  AttendanceCrypto.onChange(() => {
+    if (retentionData) renderCohortRetention(retentionData);
+    renderCommunityPanel();
+  });
 }
 
 renderSummaries();

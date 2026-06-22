@@ -55,6 +55,10 @@ log = logging.getLogger(__name__)
 _EMAIL_RE = re.compile(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
 _SAFE_FILENAME_RE = re.compile(r'[^\w\-.]')
 
+# Responses carrying name ciphertext (or the salt/sentinel used to decrypt it) must not be cached,
+# so nothing that could be decrypted to PII survives in the browser cache after the tab is closed.
+_NO_STORE = {'Cache-Control': 'no-store'}
+
 
 def _safe_filename(name: str) -> str:
     """Strip anything that isn't alphanumeric, hyphen, or dot from a filename segment."""
@@ -173,9 +177,13 @@ async def attendance_activities(request: Request, _: None = Depends(require_vali
 
 @app.get('/attendance/summaries.json')
 async def attendance_summaries(request: Request, _: None = Depends(require_valid_cookie)):
-    """Serve the per-term summary-chart datasets (beginner intake, Level 2 + social, retention)."""
+    """Serve the per-term summary-chart datasets (beginner intake, Level 2 + social, retention).
+
+    Sent ``no-store`` because the retention dataset carries teacher-name ciphertext for the
+    browser to decrypt: nothing derived from it should linger in the disk cache.
+    """
     try:
-        return JSONResponse(analysis.summaries())
+        return JSONResponse(analysis.summaries(), headers=_NO_STORE)
     except FileNotFoundError:
         log.warning('Attendance database not found at %s', config.ATTENDANCE_DB_PATH)
         return JSONResponse(
@@ -184,12 +192,30 @@ async def attendance_summaries(request: Request, _: None = Depends(require_valid
         )
 
 
-@app.get('/attendance/activity/{activity_id}/records.csv', response_class=StreamingResponse)
-async def attendance_activity_records(request: Request, activity_id: int, _: None = Depends(require_valid_cookie)):
-    """Download every record for one activity: named attendees, anonymous head-counts, and context.
+@app.get('/attendance/decrypt-params')
+async def attendance_decrypt_params(request: Request, _: None = Depends(require_valid_cookie)):
+    """The salt + sentinel the browser needs to derive the decryption key and check the passphrase.
 
-    Backs the click-to-download on the all-activities scatter. Guarded by the cookie dependency so
-    an unauthenticated request gets a clean 401 rather than a redirect into Google's OAuth flow.
+    Neither value is secret; the passphrase and the key derived from it never leave the browser.
+    """
+    try:
+        return JSONResponse(analysis.decrypt_params(), headers=_NO_STORE)
+    except FileNotFoundError:
+        log.warning('Attendance database not found at %s', config.ATTENDANCE_DB_PATH)
+        return JSONResponse(
+            {'error': 'The attendance database has not been built yet.'},
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+
+
+@app.get('/attendance/activity/{activity_id}/records.json')
+async def attendance_activity_records(request: Request, activity_id: int, _: None = Depends(require_valid_cookie)):
+    """Every record for one activity as ciphertext JSON: named attendees, head-counts, and context.
+
+    Named rows carry ``enc_name`` ciphertext; the browser decrypts it (once the operator supplies
+    the passphrase) and assembles the CSV with first/last name columns, so the server never emits
+    plaintext names. Guarded by the cookie dependency so an unauthenticated request gets a clean
+    401 rather than a redirect into Google's OAuth flow; ``no-store`` so the ciphertext isn't cached.
     """
     try:
         rows = analysis.activity_records(activity_id)
@@ -199,50 +225,32 @@ async def attendance_activity_records(request: Request, activity_id: int, _: Non
             {'error': 'The attendance database has not been built yet.'},
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
         )
-
-    buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=analysis.ACTIVITY_RECORD_FIELDS)
-    writer.writeheader()
-    writer.writerows(rows)
-    buffer.seek(0)
-    return StreamingResponse(
-        buffer,
-        media_type='text/csv',
-        headers={'Content-Disposition': f'attachment; filename="activity_{activity_id}_attendance.csv"'},
-    )
+    return JSONResponse({'activity_id': activity_id, 'rows': rows}, headers=_NO_STORE)
 
 
-@app.get('/attendance/community/dancers.csv', response_class=StreamingResponse)
+@app.get('/attendance/community/dancers.json')
 async def attendance_community_dancers(
     request: Request,
     scope: str = Query(pattern='^(incl|excl)$'),
     min_dates: int = Query(ge=1),
     _: None = Depends(require_valid_cookie),
 ):
-    """Download the DNC ids of dancers who attended at least ``min_dates`` unique dates in 2026.
+    """Dancers who attended at least ``min_dates`` unique dates in 2026, as ciphertext JSON.
 
-    ``scope`` is 'incl' or 'excl' for whether the 30th anniversary weekender counts. Backs the
-    click-to-download on the community chart.
+    Each row is ``{dancer_id, enc_name}``; the browser decrypts ``enc_name`` (once the operator
+    supplies the passphrase) into the first/last name columns of the downloaded CSV. ``scope`` is
+    'incl' or 'excl' for whether the 30th anniversary weekender counts. ``no-store`` so the
+    ciphertext isn't cached.
     """
     try:
-        ids = analysis.community_2026_dancers(scope, min_dates)
+        dancers = analysis.community_2026_dancer_rows(scope, min_dates)
     except FileNotFoundError:
         log.warning('Attendance database not found at %s', config.ATTENDANCE_DB_PATH)
         return JSONResponse(
             {'error': 'The attendance database has not been built yet.'},
             status_code=HTTPStatus.SERVICE_UNAVAILABLE,
         )
-
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(['dancer_id'])
-    writer.writerows([[i] for i in ids])
-    buffer.seek(0)
-    return StreamingResponse(
-        buffer,
-        media_type='text/csv',
-        headers={'Content-Disposition': f'attachment; filename="community_2026_{scope}_30th_min{min_dates}_dates.csv"'},
-    )
+    return JSONResponse({'scope': scope, 'min_dates': min_dates, 'dancers': dancers}, headers=_NO_STORE)
 
 
 @app.api_route('/health', methods=['GET', 'HEAD'])

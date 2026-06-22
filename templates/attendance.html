@@ -15,15 +15,39 @@
     {% include "membership_navbar.html" %}
     <main class="container">
         <h1>Attendance over time</h1>
+
+        <article id="name-unlock">
+            <header><strong>Show real names</strong></header>
+            <p id="passphrase-status-text"></p>
+            <form id="passphrase-form" autocomplete="off">
+                <fieldset role="group">
+                    <input type="password" id="passphrase-input" name="passphrase"
+                        placeholder="dancer-table passphrase" autocomplete="off"
+                        aria-label="dancer-table passphrase">
+                    <button type="submit" id="passphrase-submit">Unlock names</button>
+                </fieldset>
+                <button type="button" id="passphrase-lock" class="secondary outline" hidden>
+                    Re-lock and forget the passphrase
+                </button>
+                <p id="passphrase-error" class="error" hidden></p>
+            </form>
+            <small>
+                Names are decrypted in your browser only. The passphrase is never sent to the server
+                and is never saved — close this tab and the passphrase, and any names decrypted with
+                it, are gone.
+            </small>
+        </article>
+
         <p>
             Every activity (an individual lesson or social) we hold a record for is one point below:
             its date against the number of people. This is a high-detail view intended for data access.
             Drag to zoom, double-click to reset, hover a point for a summary, and click a point to
-            pin its full breakdown beneath the chart — including a link to download that activity's
-            complete record (named attendees as DNC ids, anonymous head-counts, and the
-            parent event details) as a CSV. Note that this won't include committee members or anyone
-            volunteering on the night: they don't buy tickets, so they don't appear in our attendance
-            records.
+            pin its full breakdown beneath the chart. Once you enter the dancer-table passphrase in
+            the box above, the breakdown offers a download of that activity's complete record as a CSV
+            — named attendees with their first and last names, anonymous head-counts, and the parent
+            event details; without the passphrase the breakdown still shows but the download is
+            disabled. Note that this won't include committee members or anyone volunteering on the
+            night: they don't buy tickets, so they don't appear in our attendance records.
         </p>
         <p><strong>Reading the chart.</strong>
             <em>Colour</em> is the event type (course, social, workshop, weekender).
@@ -79,6 +103,8 @@
             left marks the teaching team that ran each joining term, so retention can be read
             against who taught that intake. Presence here means appearing on any sheet that term,
             attended or not, because turnout was only recorded consistently from around 2024.
+            The teaching teams are labelled with id codes by default; enter the passphrase in the box
+            at the top of the page to relabel them with the teachers' first names.
         </p>
         <div id="cohort-retention-chart" style="width:100%;height:680px;"></div>
 
@@ -97,8 +123,9 @@
         <p>
             We show 2026 only because that is when we began recording Level 2 attendees by name; before
             then the Level 2 class attendee names were not recorded, so earlier years would
-            undercount the committed core. <strong>Click any point</strong> to download the
-            DNC ids of the dancers it counts, as a CSV. This won't include
+            undercount the committed core. <strong>Click any point</strong> to select the dancers it
+            counts; once you enter the dancer-table passphrase in the box at the top of the page, you
+            can download them as a CSV with their first and last names. This won't include
             Committee members or anyone volunteering on the night: they don't buy tickets, so they
             don't appear in our attendance records.
         </p>
@@ -206,6 +233,7 @@
         </details>
     </main>
 
+    <script src="/public/js/attendance_crypto.js"></script>
     <script src="/public/js/attendance.js"></script>
     <script src="/public/js/attendance_summaries.js"></script>
 </body>

@@ -131,20 +131,69 @@ function legendTraces(rows) {
   return traces;
 }
 
+// The CSV column order for an activity's full record. first_name/last_name are filled in the
+// browser from the decrypted enc_name; everything else comes straight off the server row.
+const ACTIVITY_CSV_COLUMNS = [
+  'event_name', 'event_type', 'venue', 'activity_name', 'activity_type', 'difficulty', 'date',
+  'record_type', 'dancer_id', 'first_name', 'last_name', 'status', 'ticket_type', 'head_count',
+];
+
+let selectedActivity = null; // the clicked point's customdata, kept so we can re-render on unlock
+
 function showDetails(point) {
   const cd = point.customdata;
   if (!cd) return;
+  selectedActivity = { cd, x: point.x };
+  renderPointPanel();
+}
+
+function renderPointPanel() {
+  if (!selectedActivity) return;
+  const { cd, x } = selectedActivity;
   const [eventName, activityName, eventType, difficulty, named, agg, total, registered, unknown, activityId] = cd;
-  document.getElementById('point-details-body').innerHTML = `
-    <p><strong>${eventName}</strong> — ${activityName} (${eventType}, ${difficulty})<br>
-    ${point.x}</p>
+  const summary = `
+    <p><strong>${eventName}</strong> — ${activityName} (${eventType}, ${difficulty})<br>${x}</p>
     <p>
       Attended: <strong>${total}</strong> (${named} named + ${agg} anonymous door)<br>
       Registered (named): <strong>${registered}</strong><br>
       Turnout unknown: <strong>${unknown}</strong>
-    </p>
-    <p><a href="/attendance/activity/${activityId}/records.csv" rel="noopener">Download full attendance record (CSV)</a></p>`;
+    </p>`;
+
+  const body = document.getElementById('point-details-body');
+  if (AttendanceCrypto.isUnlocked()) {
+    body.innerHTML = summary + '<p><button type="button" id="activity-download-btn">Download full record with names (CSV)</button></p>';
+    document.getElementById('activity-download-btn').addEventListener('click', (ev) =>
+      downloadActivity(activityId, ev.currentTarget)
+    );
+  } else {
+    body.innerHTML =
+      summary +
+      '<p><em>Enter the passphrase at the top of the page to download this activity\'s full record with names.</em></p>';
+  }
   document.getElementById('point-details').hidden = false;
+}
+
+async function downloadActivity(activityId, btn) {
+  btn.setAttribute('aria-busy', 'true');
+  try {
+    const resp = await fetch(`/attendance/activity/${activityId}/records.json`, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
+    const payload = await resp.json();
+    if (!resp.ok) throw new Error(payload.error || 'Could not load the activity record.');
+    const rows = [];
+    for (const r of payload.rows) {
+      const name = await AttendanceCrypto.decryptName(r.enc_name);
+      const out = { ...r, first_name: (name && name.first_name) || '', last_name: (name && name.last_name) || '' };
+      rows.push(ACTIVITY_CSV_COLUMNS.map((c) => out[c]));
+    }
+    AttendanceCrypto.downloadCsv(`activity_${activityId}_attendance.csv`, ACTIVITY_CSV_COLUMNS, rows);
+  } catch (e) {
+    alert('Download failed: ' + e.message);
+  } finally {
+    btn.removeAttribute('aria-busy');
+  }
 }
 
 async function render() {
@@ -188,6 +237,10 @@ async function render() {
     { responsive: true, scrollZoom: true, displaylogo: false }
   );
   chart.on('plotly_click', (ev) => showDetails(ev.points[0]));
+
+  // Swap the selected activity's download between the locked hint and a working button when names
+  // are unlocked or re-locked from the control at the top of the page.
+  AttendanceCrypto.onChange(() => renderPointPanel());
 }
 
 render();
