@@ -54,8 +54,26 @@ td, th {
     margin: 0;
 }
 
-/* Pico's [role=group] centres its children (align-items: center) and gives buttons height:auto,
-   so a button slightly taller than the input next to it protrudes. Stretch makes them equal. */
-#name-unlock [role="group"] {
+/* Pico's [role=group] is inline-flex with align-items: center and gives buttons height:auto, so a
+   button a touch taller than the input beside it protrudes. Take full control of this one row: a
+   block-level flex row whose children stretch to a single shared height, with the input taking the
+   slack. Higher specificity than Pico's [role=group], so these win. */
+#name-unlock .unlock-row {
+    display: flex;
     align-items: stretch;
+    gap: 0.5rem;
+    margin: 0 0 var(--pico-spacing);
+    padding: 0;
+    border: 0;
+}
+
+#name-unlock .unlock-row input {
+    flex: 1 1 auto;
+    margin-bottom: 0;
+}
+
+#name-unlock .unlock-row button {
+    flex: 0 0 auto;
+    margin-bottom: 0;
+    white-space: nowrap;
 }

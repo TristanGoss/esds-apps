@@ -20,9 +20,9 @@
             <header><strong>Personally Identifiable Information (PII) Encryption</strong></header>
             <p id="passphrase-status-text"></p>
             <form id="passphrase-form" autocomplete="off">
-                <fieldset role="group">
+                <fieldset role="group" class="unlock-row">
                     <input type="password" id="passphrase-input" name="passphrase"
-                        placeholder="PII passphrase" autocomplete="off"
+                        placeholder="passphrase" autocomplete="off"
                         aria-label="PII passphrase">
                     <button type="submit" id="passphrase-submit">Decrypt PII</button>
                 </fieldset>
@@ -31,9 +31,6 @@
                 </button>
                 <p id="passphrase-error" class="error" hidden></p>
             </form>
-            <small>
-                Decrypted PII is now available.
-            </small>
         </article>
 
         <h2>Attendance over time</h2>
