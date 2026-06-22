@@ -252,13 +252,13 @@ function renderCommunityPanel() {
     `(${where} the 30th anniversary, and excluding Volunteers and the Committee).`;
 
   if (AttendanceCrypto.isUnlocked()) {
-    body.innerHTML = lead + '<br><button type="button" id="community-download-btn">Download with names (CSV)</button></p>';
+    body.innerHTML = lead + '<br><button type="button" id="community-download-btn">Download (CSV)</button></p>';
     document.getElementById('community-download-btn').addEventListener('click', (ev) => {
       downloadCommunity(scope, minDates, ev.currentTarget);
     });
   } else {
     body.innerHTML =
-      lead + '<br><em>Enter the passphrase at the top of the page to download these dancers with their names.</em></p>';
+      lead + '<br><em>Enter the passphrase at the top of the page to download these dancers.</em></p>';
   }
   document.getElementById('community-details').hidden = false;
 }

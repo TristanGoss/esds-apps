@@ -161,14 +161,14 @@ function renderPointPanel() {
 
   const body = document.getElementById('point-details-body');
   if (AttendanceCrypto.isUnlocked()) {
-    body.innerHTML = summary + '<p><button type="button" id="activity-download-btn">Download full record with names (CSV)</button></p>';
+    body.innerHTML = summary + '<p><button type="button" id="activity-download-btn">Download full record (CSV)</button></p>';
     document.getElementById('activity-download-btn').addEventListener('click', (ev) =>
       downloadActivity(activityId, ev.currentTarget)
     );
   } else {
     body.innerHTML =
       summary +
-      '<p><em>Enter the passphrase at the top of the page to download this activity\'s full record with names.</em></p>';
+      '<p><em>Enter the passphrase at the top of the page to download this activity\'s full record.</em></p>';
   }
   document.getElementById('point-details').hidden = false;
 }
