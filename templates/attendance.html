@@ -14,17 +14,17 @@
 <body>
     {% include "membership_navbar.html" %}
     <main class="container">
-        <h1>Attendance over time</h1>
+        <h1>Attendance</h1>
 
         <article id="name-unlock">
-            <header><strong>Show real names</strong></header>
+            <header><strong>Personally Identifiable Information (PII) Encryption</strong></header>
             <p id="passphrase-status-text"></p>
             <form id="passphrase-form" autocomplete="off">
                 <fieldset role="group">
                     <input type="password" id="passphrase-input" name="passphrase"
-                        placeholder="dancer-table passphrase" autocomplete="off"
-                        aria-label="dancer-table passphrase">
-                    <button type="submit" id="passphrase-submit">Unlock names</button>
+                        placeholder="PII passphrase" autocomplete="off"
+                        aria-label="PII passphrase">
+                    <button type="submit" id="passphrase-submit">Decrypt PII</button>
                 </fieldset>
                 <button type="button" id="passphrase-lock" class="secondary outline" hidden>
                     Re-lock and forget the passphrase
@@ -32,17 +32,16 @@
                 <p id="passphrase-error" class="error" hidden></p>
             </form>
             <small>
-                Names are decrypted in your browser only. The passphrase is never sent to the server
-                and is never saved — close this tab and the passphrase, and any names decrypted with
-                it, are gone.
+                Decrypted PII is now available.
             </small>
         </article>
 
+        <h2>Attendance over time</h2>
         <p>
             Every activity (an individual lesson or social) we hold a record for is one point below:
             its date against the number of people. This is a high-detail view intended for data access.
             Drag to zoom, double-click to reset, hover a point for a summary, and click a point to
-            pin its full breakdown beneath the chart. Once you enter the dancer-table passphrase in
+            pin its full breakdown beneath the chart. Once you enter the PII passphrase in
             the box above, the breakdown offers a download of that activity's complete record as a CSV
             — named attendees with their first and last names, anonymous head-counts, and the parent
             event details; without the passphrase the breakdown still shows but the download is
@@ -103,7 +102,7 @@
             left marks the teaching team that ran each joining term, so retention can be read
             against who taught that intake. Presence here means appearing on any sheet that term,
             attended or not, because turnout was only recorded consistently from around 2024.
-            The teaching teams are labelled with id codes by default; enter the passphrase in the box
+            The teaching teams are labelled with id codes by default; enter the PII passphrase in the box
             at the top of the page to relabel them with the teachers' first names.
         </p>
         <div id="cohort-retention-chart" style="width:100%;height:680px;"></div>
@@ -124,7 +123,7 @@
             We show 2026 only because that is when we began recording Level 2 attendees by name; before
             then the Level 2 class attendee names were not recorded, so earlier years would
             undercount the committed core. <strong>Click any point</strong> to select the dancers it
-            counts; once you enter the dancer-table passphrase in the box at the top of the page, you
+            counts; once you enter the PII passphrase in the box at the top of the page, you
             can download them as a CSV with their first and last names. This won't include
             Committee members or anyone volunteering on the night: they don't buy tickets, so they
             don't appear in our attendance records.

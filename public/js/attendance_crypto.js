@@ -137,8 +137,8 @@ const AttendanceCrypto = (() => {
       if (lockBtn) lockBtn.hidden = !unlocked;
       if (status) {
         status.textContent = unlocked
-          ? 'Names are unlocked for this browser tab. Downloads include first and last names, and the retention legend shows teachers by first name.'
-          : 'Names stay encrypted until you enter the passphrase. Without it, downloads carry pseudonyms only and the retention legend shows id codes.';
+          ? 'PII is decrypted. Downloads include first and last names, and the retention legend shows teachers by first name.'
+          : 'PII remains encrypted until you enter the passphrase.';
       }
     };
 

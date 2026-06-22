@@ -53,3 +53,9 @@ td, th {
     display: inline;
     margin: 0;
 }
+
+/* Pico's [role=group] centres its children (align-items: center) and gives buttons height:auto,
+   so a button slightly taller than the input next to it protrudes. Stretch makes them equal. */
+#name-unlock [role="group"] {
+    align-items: stretch;
+}
