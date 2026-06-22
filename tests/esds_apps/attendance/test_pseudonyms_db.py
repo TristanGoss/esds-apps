@@ -55,7 +55,7 @@ def test_derive_id_key_differs_with_different_passphrase():
 def test_setup_db_creates_tables(tmp_db):
     conn = pseudonyms_db._setup_db(tmp_db)
     tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    assert {'meta', 'pseudonyms'} <= tables
+    assert {'meta', 'dancer'} <= tables
     conn.close()
 
 
@@ -160,7 +160,7 @@ def test_get_or_create_dancer_id_distinct_people(ctx):
     assert id1 != id2
 
 
-_SELECT_ENC = 'SELECT enc_name, enc_email FROM pseudonyms WHERE dancer_id=?'
+_SELECT_ENC = 'SELECT enc_name, enc_email FROM dancer WHERE dancer_id=?'
 
 
 def test_get_or_create_dancer_id_name_only(ctx):

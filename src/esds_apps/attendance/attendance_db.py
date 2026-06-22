@@ -1,11 +1,15 @@
 """Attendance database — core schema and write API.
 
-A standalone SQLite file holding only ``dancer_id`` pseudonyms and headcounts —
-never names or emails — so it can safely go online while ``pseudonyms.sqlite``
-stays offline. This module owns the schema and a narrow write API; it never reads
-a spreadsheet cell. Parsers (see ``ingest.py``) do that and call in here.
+A SQLite file holding the attendance records (headcounts and per-dancer rows) plus the ``dancer``
+identity table, which keeps each ``dancer_id``'s name/email only as Fernet ciphertext under a key
+that is never stored here (it is derived from a passphrase supplied at decrypt time). So the file
+can go online and a breach yields only ciphertext. The attendance / event_teacher / waitlist rows
+all reference ``dancer(dancer_id)``; dancer rows are minted only by pseudonymisation, so a dancer
+must be pseudonymised before their attendance is ingested.
 
-See ``working/attendance_db_design.md`` for the design rationale.
+This module owns the attendance schema and a narrow write API; it never creates a dancer (that is
+the pseudonymiser's job, see ``pseudonyms_db``) and never reads a spreadsheet cell (parsers in
+``ingest.py`` do that and call in here). See ``working/attendance_db_design.md`` for the rationale.
 """
 
 import os
@@ -88,11 +92,9 @@ class AttendanceDb:
         self.conn.commit()
         return cur.lastrowid
 
-    # ---- dancers ----
-
-    def ensure_dancer(self, dancer_id: str) -> None:
-        """Register a pseudonymous dancer id if not already present."""
-        self.conn.execute('INSERT OR IGNORE INTO dancer (dancer_id) VALUES (?)', (dancer_id,))
+    # Dancers are not created here: a dancer_id must already exist in the dancer table (minted by
+    # pseudonymisation) before it can be referenced. The foreign keys on attendance / event_teacher
+    # / waitlist enforce that. So there is no ensure_dancer — the write API only references dancers.
 
     # ---- events ----
 
@@ -119,9 +121,7 @@ class AttendanceDb:
         return event_id
 
     def set_event_teachers(self, event_id: int, dancer_ids: list[str]) -> None:
-        """Replace the teacher set for an event (idempotent)."""
-        for dancer_id in dancer_ids:
-            self.ensure_dancer(dancer_id)
+        """Replace the teacher set for an event (idempotent). Each teacher must already be a dancer."""
         self.conn.execute('DELETE FROM event_teacher WHERE event_id = ?', (event_id,))
         self.conn.executemany(
             'INSERT OR IGNORE INTO event_teacher (event_id, dancer_id) VALUES (?, ?)',
@@ -191,7 +191,6 @@ class AttendanceDb:
         (ingest_id, source_cell) follow the kept status; ticket_type is COALESCE'd so either
         source can fill it.
         """
-        self.ensure_dancer(dancer_id)
         # Rank the incoming status against the stored one; the higher rank is kept. On a tie
         # (same rank) the incoming row is taken, so a re-ingest still refreshes provenance.
         rank = "(CASE {0} WHEN 'attended' THEN 2 WHEN 'absent' THEN 1 ELSE 0 END)"
@@ -256,7 +255,6 @@ class AttendanceDb:
         treats NULLs as distinct in a UNIQUE index, so it would never conflict.
         """
         if dancer_id is not None:
-            self.ensure_dancer(dancer_id)
             self.conn.execute(
                 'INSERT INTO waitlist (event_id, dancer_id, head_count, ingest_id, source_cell) '
                 'VALUES (?, ?, ?, ?, ?) '
@@ -292,10 +290,16 @@ def _tt(ticket_type: TicketType | None) -> str | None:
     return str(ticket_type) if ticket_type is not None else None
 
 
-def open_db(db_path: Path | str) -> AttendanceDb:
-    """Open (or create) the attendance database. Idempotent; safe to call repeatedly."""
+def open_db(db_path: Path | str, enforce_foreign_keys: bool = True) -> AttendanceDb:
+    """Open (or create) the attendance database. Idempotent; safe to call repeatedly.
+
+    ``enforce_foreign_keys`` toggles SQLite's per-connection foreign-key enforcement. It is on by
+    default (production, notebooks): writing attendance for a dancer with no ``pseudonyms`` row
+    then fails fast. Attendance-subsystem unit tests that build records without seeding the
+    pseudonym store pass ``False`` so the cross-store link doesn't have to be satisfied there.
+    """
     conn = sqlite3.connect(db_path)
-    conn.execute('PRAGMA foreign_keys = ON')
+    conn.execute(f'PRAGMA foreign_keys = {"ON" if enforce_foreign_keys else "OFF"}')
     if str(db_path) != ':memory:':
         conn.execute('PRAGMA journal_mode = WAL')
     with open(SCHEMA_PATH, 'r') as f:

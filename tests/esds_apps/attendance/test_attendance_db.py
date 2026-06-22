@@ -1,3 +1,4 @@
+import sqlite3
 from datetime import date, datetime
 
 import pytest
@@ -14,7 +15,10 @@ from esds_apps.attendance.attendance_db import (
 
 @pytest.fixture
 def db(tmp_path):
-    d = open_db(tmp_path / 'attendance.sqlite')
+    # Enforcement off: these tests register dancers without seeding the pseudonyms store. The
+    # dancer -> pseudonyms link is covered explicitly in
+    # test_dancer_foreign_key_into_pseudonyms_is_enforced.
+    d = open_db(tmp_path / 'attendance.sqlite', enforce_foreign_keys=False)
     yield d
     d.close()
 
@@ -33,6 +37,7 @@ def test_open_creates_tables_and_view(db):
         'event_teacher',
         'ingest_log',
         'waitlist',
+        'meta',
     } <= names
     assert 'activity_attendance' in names
 
@@ -41,6 +46,20 @@ def test_open_is_idempotent(tmp_path):
     p = tmp_path / 'a.sqlite'
     open_db(p).close()
     open_db(p).close()  # must not raise
+
+
+def test_attendance_requires_existing_dancer_when_foreign_keys_enforced(tmp_path):
+    """With enforcement on (the production default), attendance needs the dancer to exist first."""
+    d = open_db(tmp_path / 'fk.sqlite')  # enforce_foreign_keys=True
+    eid = d.upsert_event('E', EventType.SOCIAL)
+    act = d.upsert_activity(eid, 'Social', date(2026, 1, 1), ActivityType.SOCIAL)
+    with pytest.raises(sqlite3.IntegrityError):
+        d.record_attendance(act, 'DNC-NOPE', status=AttendanceStatus.ATTENDED)  # no dancer row -> FK violation
+    # Mint the dancer (as pseudonymisation would), then the same attendance records cleanly.
+    d.conn.execute("INSERT INTO dancer (dancer_id) VALUES ('DNC-OK')")
+    d.record_attendance(act, 'DNC-OK', status=AttendanceStatus.ATTENDED)
+    assert d.conn.execute("SELECT COUNT(*) FROM attendance WHERE dancer_id = 'DNC-OK'").fetchone()[0] == 1
+    d.close()
 
 
 # ---- _to_iso_date ----
@@ -69,13 +88,12 @@ def test_upsert_event_does_not_clobber_venue_with_none(db):
     assert db.conn.execute('SELECT venue FROM event WHERE event_id=?', (eid,)).fetchone()[0] == 'Hall'
 
 
-def test_set_event_teachers_replaces_and_registers_dancers(db):
+def test_set_event_teachers_replaces(db):
     eid = db.upsert_event('E', EventType.COURSE)
     db.set_event_teachers(eid, ['DNC-AAAA1111', 'DNC-BBBB2222'])
     db.set_event_teachers(eid, ['DNC-AAAA1111'])  # replace
     teachers = [r[0] for r in db.conn.execute('SELECT dancer_id FROM event_teacher WHERE event_id=?', (eid,))]
     assert teachers == ['DNC-AAAA1111']
-    assert db.conn.execute('SELECT COUNT(*) FROM dancer').fetchone()[0] == 2  # both registered
 
 
 # ---- activities ----
@@ -122,13 +140,6 @@ def test_record_attendance_stores_unknown_status(db):
     act = db.upsert_activity(eid, 'Social', date(2023, 12, 14))
     db.record_attendance(act, 'DNC-7', status=AttendanceStatus.UNKNOWN)
     assert db.conn.execute('SELECT status FROM attendance WHERE activity_id=?', (act,)).fetchone() == ('unknown',)
-
-
-def test_record_attendance_registers_dancer(db):
-    eid = db.upsert_event('E', EventType.COURSE)
-    act = db.upsert_activity(eid, 'W1', date(2025, 5, 22))
-    db.record_attendance(act, 'DNC-Z', status=AttendanceStatus.ATTENDED)
-    assert db.conn.execute('SELECT 1 FROM dancer WHERE dancer_id=?', ('DNC-Z',)).fetchone() == (1,)
 
 
 @pytest.mark.parametrize(

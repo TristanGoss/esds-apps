@@ -71,7 +71,7 @@ def _setup_db(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
     conn.execute('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)')
     conn.execute(
-        'CREATE TABLE IF NOT EXISTS pseudonyms ('
+        'CREATE TABLE IF NOT EXISTS dancer ('
         '  dancer_id   TEXT PRIMARY KEY,'
         '  enc_name    TEXT,'
         '  enc_email   TEXT,'
@@ -211,7 +211,7 @@ def get_or_create_dancer_id(
     for field, value in [('email_hash', email_key), ('name_hash', name_key)]:
         if value:
             row = ctx.conn.execute(
-                f'SELECT dancer_id FROM pseudonyms WHERE {field}=?',
+                f'SELECT dancer_id FROM dancer WHERE {field}=?',
                 (_value_hash(value, ctx.mac_key),),
             ).fetchone()
             if row:
@@ -220,7 +220,7 @@ def get_or_create_dancer_id(
 
     if found_id:
         existing_enc_name, existing_enc_email = ctx.conn.execute(
-            'SELECT enc_name, enc_email FROM pseudonyms WHERE dancer_id=?', (found_id,)
+            'SELECT enc_name, enc_email FROM dancer WHERE dancer_id=?', (found_id,)
         ).fetchone()
         updates = _build_field_updates(ctx.fernet, ctx.mac_key, existing_enc_name, name_fields, name_key, _NAME_SPEC)
         updates.update(
@@ -228,20 +228,20 @@ def get_or_create_dancer_id(
         )
         if updates:
             set_clause = ', '.join(f'{k}=?' for k in updates)
-            ctx.conn.execute(f'UPDATE pseudonyms SET {set_clause} WHERE dancer_id=?', (*updates.values(), found_id))
+            ctx.conn.execute(f'UPDATE dancer SET {set_clause} WHERE dancer_id=?', (*updates.values(), found_id))
             ctx.conn.commit()
         return found_id
 
     primary_key = email_key or name_key
     dancer_id = _derive_dancer_id(ctx.id_key, primary_key)
-    if ctx.conn.execute('SELECT 1 FROM pseudonyms WHERE dancer_id=?', (dancer_id,)).fetchone():
+    if ctx.conn.execute('SELECT 1 FROM dancer WHERE dancer_id=?', (dancer_id,)).fetchone():
         raise ValueError(
             f'Dancer ID collision for {dancer_id!r} — two distinct inputs produced the same 8-character prefix. '
             'This is extremely unlikely; verify that the inputs are genuinely different people.'
         )
 
     ctx.conn.execute(
-        'INSERT INTO pseudonyms (dancer_id, enc_name, enc_email, name_hash, email_hash) VALUES (?, ?, ?, ?, ?)',
+        'INSERT INTO dancer (dancer_id, enc_name, enc_email, name_hash, email_hash) VALUES (?, ?, ?, ?, ?)',
         (
             dancer_id,
             _encrypt(ctx.fernet, name_fields) if name_fields else None,
@@ -261,14 +261,14 @@ def decrypt_all(ctx: DbContext) -> list[dict]:
             'name': _decrypt_fields(ctx.fernet, n),
             'email': _decrypt_fields(ctx.fernet, e),
         }
-        for d, n, e in ctx.conn.execute('SELECT dancer_id, enc_name, enc_email FROM pseudonyms')
+        for d, n, e in ctx.conn.execute('SELECT dancer_id, enc_name, enc_email FROM dancer')
     ]
 
 
 def decrypt_dancer(ctx: DbContext, dancer_id: str) -> dict | None:
     """Decrypt and return the identity for a single dancer_id, or None if not found."""
     row = ctx.conn.execute(
-        'SELECT enc_name, enc_email FROM pseudonyms WHERE dancer_id=?',
+        'SELECT enc_name, enc_email FROM dancer WHERE dancer_id=?',
         (dancer_id,),
     ).fetchone()
     if row is None:
@@ -348,11 +348,11 @@ def substitute_dancer_id(  # noqa: PLR0913
     never overwritten). Leave any of them None to discard that field silently.
     """
     old_row = ctx.conn.execute(
-        'SELECT enc_name, enc_email, name_hash, email_hash FROM pseudonyms WHERE dancer_id=?',
+        'SELECT enc_name, enc_email, name_hash, email_hash FROM dancer WHERE dancer_id=?',
         (old_id,),
     ).fetchone()
     new_row = ctx.conn.execute(
-        'SELECT enc_name, enc_email, name_hash, email_hash FROM pseudonyms WHERE dancer_id=?',
+        'SELECT enc_name, enc_email, name_hash, email_hash FROM dancer WHERE dancer_id=?',
         (new_id,),
     ).fetchone()
 
@@ -362,7 +362,7 @@ def substitute_dancer_id(  # noqa: PLR0913
         raise ValueError(f'{new_id!r} not found in database')
 
     # Delete first so the UNIQUE constraints on name_hash/email_hash are freed.
-    ctx.conn.execute('DELETE FROM pseudonyms WHERE dancer_id=?', (old_id,))
+    ctx.conn.execute('DELETE FROM dancer WHERE dancer_id=?', (old_id,))
 
     conflicts = {
         'first_name': conflict_first_name,
@@ -372,7 +372,7 @@ def substitute_dancer_id(  # noqa: PLR0913
     updates = _merge_updates(ctx.fernet, old_row, new_row, conflicts)
     if updates:
         set_clause = ', '.join(f'{k}=?' for k in updates)
-        ctx.conn.execute(f'UPDATE pseudonyms SET {set_clause} WHERE dancer_id=?', (*updates.values(), new_id))
+        ctx.conn.execute(f'UPDATE dancer SET {set_clause} WHERE dancer_id=?', (*updates.values(), new_id))
 
     ctx.conn.commit()
 

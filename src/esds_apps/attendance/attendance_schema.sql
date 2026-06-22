@@ -1,13 +1,19 @@
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+
+CREATE TABLE IF NOT EXISTS dancer (
+    dancer_id   TEXT PRIMARY KEY,
+    enc_name    TEXT,
+    enc_email   TEXT,
+    name_hash   TEXT UNIQUE,
+    email_hash  TEXT UNIQUE
+);
+
 CREATE TABLE IF NOT EXISTS event (
     event_id   INTEGER PRIMARY KEY,
     name       TEXT NOT NULL,
     event_type TEXT NOT NULL,
     venue      TEXT,
     UNIQUE(name)
-);
-
-CREATE TABLE IF NOT EXISTS dancer (
-    dancer_id TEXT PRIMARY KEY
 );
 
 CREATE TABLE IF NOT EXISTS event_teacher (

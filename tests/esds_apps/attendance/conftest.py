@@ -21,8 +21,13 @@ def fast_kdf(monkeypatch):
 
 @pytest.fixture
 def db(tmp_path):
-    """A fresh attendance database, shared by the parser and dispatcher tests."""
-    d = open_db(tmp_path / 'attendance.sqlite')
+    """A fresh attendance database, shared by the parser and dispatcher tests.
+
+    Foreign-key enforcement is off: these tests build attendance records directly without seeding
+    the pseudonyms store, so the dancer -> pseudonyms link doesn't have to be satisfied here. The
+    link's enforcement is covered explicitly in test_attendance_db.
+    """
+    d = open_db(tmp_path / 'attendance.sqlite', enforce_foreign_keys=False)
     yield d
     d.close()
 

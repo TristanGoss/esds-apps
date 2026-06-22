@@ -278,7 +278,7 @@ def _pseudonymise_sheet(
         col_rename.update({c: 'redacted' for c in block.redact_cols})
     out_fieldnames = [col_rename.get(c, _original_header(c)) for c in fieldnames]
 
-    before = ctx.conn.execute('SELECT COUNT(*) FROM pseudonyms').fetchone()[0]
+    before = ctx.conn.execute('SELECT COUNT(*) FROM dancer').fetchone()[0]
     for row in rows:
         for block in blocks:
             name_fields, email_fields = _record_fields(row, block.name_cols, block.email_cols)
@@ -288,7 +288,7 @@ def _pseudonymise_sheet(
             for col in block.redact_cols:
                 row[col] = 'redacted'
 
-    new_count = ctx.conn.execute('SELECT COUNT(*) FROM pseudonyms').fetchone()[0] - before
+    new_count = ctx.conn.execute('SELECT COUNT(*) FROM dancer').fetchone()[0] - before
     _write_sheet(ws_out, out_fieldnames, rows, fieldnames, prefix_rows)
     return rows, new_count
 

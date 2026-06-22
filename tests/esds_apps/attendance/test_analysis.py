@@ -37,7 +37,7 @@ def built_db(tmp_path, monkeypatch):
     overlap across terms so the retention matrix has off-diagonal structure.
     """
     path = tmp_path / 'attendance.sqlite'
-    db = open_db(path)
+    db = open_db(path, enforce_foreign_keys=False)  # records built without seeding the pseudonyms store
 
     t1 = datetime.date(2024, 9, 2)
     t2 = datetime.date(2024, 11, 4)
