@@ -18,6 +18,8 @@ const AttendanceCrypto = (() => {
 
   let keys = null; // { aesKey, hmacKey } as non-extractable CryptoKeys, or null when locked
   let params = null; // { saltBytes, sentinelToken } fetched once from the server
+  let lockTimer = null; // auto-lock countdown handle; cleared on lock, reset on every use
+  const AUTO_LOCK_MS = 5 * 60 * 1000; // forget the keys after this much inactivity
 
   function hexToBytes(hex) {
     const out = new Uint8Array(hex.length / 2);
@@ -85,6 +87,7 @@ const AttendanceCrypto = (() => {
     }
     if (plain !== SENTINEL) throw new WrongPassphraseError();
     keys = k;
+    scheduleAutoLock();
   }
 
   function isUnlocked() {
@@ -93,12 +96,25 @@ const AttendanceCrypto = (() => {
 
   function lock() {
     keys = null;
+    if (lockTimer) {
+      clearTimeout(lockTimer);
+      lockTimer = null;
+    }
+  }
+
+  function scheduleAutoLock() {
+    if (lockTimer) clearTimeout(lockTimer);
+    lockTimer = setTimeout(() => {
+      lock();
+      notify();
+    }, AUTO_LOCK_MS);
   }
 
   // Decrypt one enc_name ciphertext to its fields object ({first_name, last_name, ...}), or null
   // for a null/empty token. Throws if the module is locked.
   async function decryptName(token) {
     if (!keys) throw new Error('locked');
+    scheduleAutoLock(); // any use of the keys defers the auto-lock
     if (!token) return null;
     return JSON.parse(await fernetDecrypt(token, keys));
   }
@@ -137,10 +153,12 @@ const AttendanceCrypto = (() => {
       if (lockBtn) lockBtn.hidden = !unlocked;
       if (status) {
         status.textContent = unlocked
-          ? 'PII is decrypted. Downloads include first and last names, and the retention legend shows teachers by first name.'
+          ? 'PII is decrypted. It will revert to encrypted after 5 minutes of inactivity. Downloads are enabled, and the retention legend now shows teachers by first name.'
           : 'PII remains encrypted until you enter the passphrase.';
       }
     };
+
+    onChange(refresh); // re-locking from anywhere (incl. the auto-lock timer) updates this control
 
     form.addEventListener('submit', async (ev) => {
       ev.preventDefault();
@@ -149,7 +167,6 @@ const AttendanceCrypto = (() => {
       try {
         await unlock(input.value);
         input.value = ''; // never leave the passphrase in the DOM
-        refresh();
         notify();
       } catch (e) {
         input.value = '';
@@ -167,7 +184,6 @@ const AttendanceCrypto = (() => {
     if (lockBtn) {
       lockBtn.addEventListener('click', () => {
         lock();
-        refresh();
         notify();
       });
     }
