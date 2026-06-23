@@ -1594,10 +1594,10 @@ def _activity_name(
 # first whose ``matches`` returns True.
 PARSERS: list[Parser] = [
     StockbridgeSwingoutParser(),
+    L2SOAttendanceParser(),
     RosterParser(),
     Level2TallyParser(),
     Level2CountGridParser(),
-    L2SOAttendanceParser(),
     SocialRegisterParser(),
     DancecloudActivityParser(),
     BookingExportParser(),

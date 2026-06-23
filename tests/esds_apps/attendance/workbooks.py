@@ -123,6 +123,29 @@ def _l2_so_ws(title='2026 L2 & SO Attendance'):
     return ws
 
 
+def _l2_so_absent_heavy_ws(title='L2 and SO Attendance'):
+    """An L2 & SO sheet whose first rows are mostly 'Absent', as a term of many no-shows looks.
+
+    'Absent' is both a valid L2/SO category and a roster 'no' marker, so the cells RosterParser
+    samples here read as attendance markers and tip it over its threshold — the real-world dispatch
+    collision. Still genuinely an L2 & SO sheet (some 'Level 2 & Social' / 'Social-Only' below), so a
+    correct parse yields a Level 2 lesson and a social with real attendance, not an all-absent roster.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['C1'] = datetime(2026, 5, 21)
+    ws['D1'] = datetime(2026, 5, 28)
+    ws['B2'], ws['C2'], ws['D2'] = 'dancer_id', 'Session 1', 'Session 2'
+    # The rows RosterParser samples (first few) are all 'Absent'.
+    ws['B3'], ws['C3'], ws['D3'] = 'DNC-1', 'Absent', 'Absent'
+    ws['B4'], ws['C4'], ws['D4'] = 'DNC-2', 'Absent', 'Absent'
+    ws['B5'], ws['C5'], ws['D5'] = 'DNC-3', 'Absent', 'Level 2 & Social'
+    # Real attendance further down, so a correct parse has a non-empty Level 2 lesson and a social.
+    ws['B6'], ws['C6'], ws['D6'] = 'DNC-4', 'Level 2 & Social', 'Social-Only'
+    return ws
+
+
 def _l1_attendance_2026_ws(title='2026 L1 Attendance'):
     """A 2026 L1 Attendance sheet: dates in the header row, session names optional."""
     wb = openpyxl.Workbook()

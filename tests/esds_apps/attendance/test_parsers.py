@@ -20,6 +20,7 @@ from .workbooks import (
     _count_grid_ws,
     _dancer_list_no_marker_ws,
     _l1_attendance_2026_ws,
+    _l2_so_absent_heavy_ws,
     _l2_so_ws,
     _roster_concession_ws,
     _roster_weekly_ws,
@@ -288,6 +289,31 @@ def test_roster_matches_class_list_with_embedded_week_dates():
 def test_l2_so_matches_l2_so_only():
     assert parsers.L2SOAttendanceParser().matches(_l2_so_ws())
     assert not parsers.L2SOAttendanceParser().matches(_roster_ws())
+
+
+def test_absent_heavy_l2_so_dispatches_to_l2_so_not_roster():
+    """An L2 & SO sheet dominated by 'Absent' must route to the L2/SO parser, not the roster.
+
+    'Absent' doubles as a roster 'no' marker, so RosterParser.matches() legitimately fires here;
+    the dispatch order (L2/SO before roster) is what keeps the sheet from being mis-read as a plain
+    Level 2 roster — which dropped the social and zeroed the Level 2 turnout for May-Jun 2026.
+    """
+    ws = _l2_so_absent_heavy_ws()
+    assert parsers.RosterParser().matches(ws)  # the collision: 'Absent' reads as a marker
+    winner = next((p for p in parsers.PARSERS if p.matches(ws)), None)
+    assert winner is not None and winner.name == 'l2_so_attendance'
+
+
+def test_absent_heavy_l2_so_parses_lesson_and_social(db):
+    """Parsing the absent-heavy sheet yields a non-empty Level 2 lesson and a social, not all-absent."""
+    parsers.L2SOAttendanceParser().parse(_l2_so_absent_heavy_ws(), db, term='May 2026', year=2026, ingest_id=None)
+    l2_attended = db.conn.execute(
+        'SELECT COUNT(*) FROM attendance at JOIN activity a USING(activity_id) '
+        "WHERE a.difficulty = 'Level 2' AND at.status = 'attended'"
+    ).fetchone()[0]
+    socials = db.conn.execute("SELECT COUNT(*) FROM activity WHERE activity_type = 'social'").fetchone()[0]
+    assert l2_attended >= 1  # the 'Level 2 & Social' rows are recorded as Level 2 attendees
+    assert socials >= 1  # the 'Social-Only' row creates a social activity
 
 
 def test_social_register_matches_only_undated_present_sheets():

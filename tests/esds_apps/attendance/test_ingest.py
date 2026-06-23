@@ -188,6 +188,39 @@ def test_ingest_folder_flags_lone_attendees_rollup(tmp_path, db):
     assert report.redundant == []
 
 
+# ---- single-file dispatch ----
+
+
+def test_ingest_file_dispatches_single_workbook(tmp_path, db):
+    """ingest_file ingests one workbook on its own, labelling the rows with the bare file name."""
+    path = tmp_path / 'May-Jun 2025 Attendance_pseudonymised.xlsx'
+    _roster_ws().parent.save(path)
+
+    report = ingest.ingest_file(path, db)
+    assert ('Level 1 Attendance', 'roster') in {(s, p) for _, s, p in report.handled}
+    assert db.conn.execute("SELECT COUNT(*) FROM activity WHERE name='Level 1 (2025-05-22)'").fetchone() == (1,)
+    assert all(src == path.name for src, _, _ in report.handled)  # default rel label is the file name
+
+
+def test_ingest_file_uses_supplied_rel_label(tmp_path, db):
+    """A caller can pass a tree-relative rel so the ingest matches what a folder rebuild would store."""
+    path = tmp_path / 'May-Jun 2025 Attendance_pseudonymised.xlsx'
+    _roster_ws().parent.save(path)
+
+    report = ingest.ingest_file(path, db, rel='sub/May-Jun 2025 Attendance_pseudonymised.xlsx')
+    assert all(src == 'sub/May-Jun 2025 Attendance_pseudonymised.xlsx' for src, _, _ in report.handled)
+
+
+def test_ingest_file_skips_membership_workbook(tmp_path, db):
+    """A membership workbook is passed over by filename, same as in the folder walk."""
+    path = tmp_path / 'ESDS Membership Attendees 2022-11-02_pseudonymised.xlsx'
+    _booking_by_activity_ws().parent.save(path)
+
+    report = ingest.ingest_file(path, db)
+    assert report.handled == [] and report.unhandled == []
+    assert db.conn.execute('SELECT COUNT(*) FROM event').fetchone() == (0,)
+
+
 def test_ingest_folder_skips_bookkeeping_sheets(tmp_path, db):
     """'Exceptions', 'Loyalty' and 'Tickets' tabs carry no per-session attendance."""
     root = tmp_path / 'outputs'

@@ -125,31 +125,50 @@ def _redundant_rollup_titles(wb) -> set[str]:
     return {ws.title for ws in wb.worksheets if ws.title.strip().lower() in _REDUNDANT_WHEN_BY_ACTIVITY}
 
 
+def ingest_file(
+    path,
+    db: AttendanceDb,
+    parsers: list | None = None,
+    rel: str | None = None,
+    report: IngestReport | None = None,
+) -> IngestReport:
+    """Ingest one already-pseudonymised ``.xlsx`` into ``db``; return its IngestReport.
+
+    The dancers it references must already exist in the ``dancer`` table (pseudonymise the file
+    first); the foreign keys reject attendance for an unknown dancer. Idempotent: the write API
+    upserts, so re-ingesting the same file refreshes its rows rather than duplicating them.
+    """
+    parsers = parsers if parsers is not None else PARSERS
+    report = report if report is not None else IngestReport()
+    if path.name.startswith(('~$', '.~lock')):
+        return report
+    if any(token in path.stem.lower() for token in _NON_ATTENDANCE_FILES):
+        return report  # membership / master-members workbooks are not class or social attendance
+    rel = rel if rel is not None else path.name
+    wb = openpyxl.load_workbook(path, data_only=False)
+    term, year, anchor = _term_from(path), _resolve_year(wb, path), _week_anchor(wb)
+    redundant_titles = _redundant_rollup_titles(wb)
+    for ws in wb.worksheets:
+        ws_lower = ws.title.strip().lower()
+        if any(pattern in ws_lower for pattern in _NON_ATTENDANCE_SHEETS):
+            continue  # skip non-attendance sheets
+        parser = next((p for p in parsers if p.matches(ws)), None)
+        if parser is None:
+            # The plain 'Attendees' rollup of a dancecloud export is the same bookings as its
+            # 'Attendees By Activity' sibling minus the dates — captured, not unparsed.
+            bucket = report.redundant if ws.title in redundant_titles else report.unhandled
+            bucket.append((rel, ws.title))
+            continue
+        ingest_id = db.start_ingest(rel, ws.title)
+        parser.parse(ws, db, term=term, year=year, ingest_id=ingest_id, week_anchor=anchor)
+        report.handled.append((rel, ws.title, parser.name))
+    return report
+
+
 def ingest_folder(output_root, db: AttendanceDb, parsers: list | None = None) -> IngestReport:
     """Walk the attendance_outputs tree, dispatch each sheet to a matching parser."""
     parsers = parsers if parsers is not None else PARSERS
     report = IngestReport()
     for path in sorted(output_root.rglob('*.xlsx')):
-        if path.name.startswith(('~$', '.~lock')):
-            continue
-        if any(token in path.stem.lower() for token in _NON_ATTENDANCE_FILES):
-            continue  # membership / master-members workbooks are not class or social attendance
-        rel = path.relative_to(output_root).as_posix()
-        wb = openpyxl.load_workbook(path, data_only=False)
-        term, year, anchor = _term_from(path), _resolve_year(wb, path), _week_anchor(wb)
-        redundant_titles = _redundant_rollup_titles(wb)
-        for ws in wb.worksheets:
-            ws_lower = ws.title.strip().lower()
-            if any(pattern in ws_lower for pattern in _NON_ATTENDANCE_SHEETS):
-                continue  # skip non-attendance sheets
-            parser = next((p for p in parsers if p.matches(ws)), None)
-            if parser is None:
-                # The plain 'Attendees' rollup of a dancecloud export is the same bookings as its
-                # 'Attendees By Activity' sibling minus the dates — captured, not unparsed.
-                bucket = report.redundant if ws.title in redundant_titles else report.unhandled
-                bucket.append((rel, ws.title))
-                continue
-            ingest_id = db.start_ingest(rel, ws.title)
-            parser.parse(ws, db, term=term, year=year, ingest_id=ingest_id, week_anchor=anchor)
-            report.handled.append((rel, ws.title, parser.name))
+        ingest_file(path, db, parsers=parsers, rel=path.relative_to(output_root).as_posix(), report=report)
     return report
