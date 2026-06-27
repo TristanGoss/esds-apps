@@ -11,10 +11,12 @@ from .workbooks import (
     _booking_by_activity_ws,
     _booking_list_ws,
     _booking_summary_ws,
+    _booking_with_concession_ws,
     _booking_ws_on,
     _checked_in_by_activity_ws,
     _checked_in_multiday_class_ws,
     _checked_in_no_scans_ws,
+    _checked_in_with_concession_ws,
     _class_list_roster_ws,
     _count_grid_undated_ws,
     _count_grid_ws,
@@ -224,6 +226,12 @@ def test_dancecloud_event_name_strips_trailing_date_and_suffixes_year():
     assert parsers._dancecloud_event_name('30 Years of ESDS March 20th-22nd 2026', 2026) == '30 Years of ESDS (2026)'
     assert parsers._dancecloud_event_name('Stroll Workshop and Tea Dance June 7th 2026', None) == (
         'Stroll Workshop and Tea Dance'
+    )
+    # The ISO export stamp dancecloud writes ('YYYY-MM-DD HHMM') is dropped, time and all, so
+    # several re-exports of one party collapse to a single year-tagged event.
+    assert (
+        parsers._dancecloud_event_name('End of Term Party with Iain Ewing and the Chevaliers 2026-06-27 1153', 2026)
+        == 'End of Term Party with Iain Ewing and the Chevaliers (2026)'
     )
 
 
@@ -755,6 +763,24 @@ def test_booking_export_dated_records_unknown_per_session(db):
     assert db.conn.execute("SELECT COUNT(*) FROM attendance WHERE status='attended'").fetchone() == (0,)
 
 
+def test_booking_export_reads_concession_from_sibling_attendees_tab(db):
+    """The older booking export also recovers ticket type from the sibling 'Attendees' rollup.
+
+    Its dated 'Attendees By Activity' tab carries no member-rate flag, so the parser reaches across
+    to the workbook's 'Attendees' rollup (the shared ``_concession_by_dancer`` path): DNC-1 ('No')
+    is ordinary, DNC-2 ('Yes') member/concession, DNC-3 has no rollup row so its ticket type is NULL.
+    """
+    parsers.BookingExportParser().parse(
+        _booking_with_concession_ws(),
+        db,
+        term='Level 1 Fundamentals Term A 2023-01-17 2255',
+        year=2023,
+        ingest_id=None,
+    )
+    tickets = dict(db.conn.execute('SELECT dancer_id, ticket_type FROM attendance').fetchall())
+    assert tickets == {'DNC-1': 'ordinary', 'DNC-2': 'member_or_concession', 'DNC-3': None}
+
+
 def test_booking_export_same_term_name_splits_by_session_months(db):
     """One reused 'Term B' label across non-overlapping months becomes distinct events.
 
@@ -869,6 +895,24 @@ def test_dancecloud_activity_propagates_class_checkin_across_its_days(db):
         ('Track A - Classes', '2026-03-22', 'DNC-2', 'attended'),  # scanned day 2
         ('Track A - Classes', '2026-03-22', 'DNC-3', 'absent'),
     ]
+
+
+def test_dancecloud_activity_reads_concession_from_sibling_attendees_tab(db):
+    """Ticket type is recovered from the sibling 'Attendees' rollup the by-activity tab lacks.
+
+    The 'Attendees By Activity' tab carries no member-rate flag, so the parser reaches across to
+    the workbook's 'Attendees' rollup: DNC-1 ('Yes') is member/concession, DNC-2 ('No') ordinary,
+    DNC-3 has no rollup row so its ticket type stays unknown (NULL).
+    """
+    parsers.DancecloudActivityParser().parse(
+        _checked_in_with_concession_ws(),
+        db,
+        term='End of Term Party with Iain Ewing and the Chevaliers 2026-06-27 1153',
+        year=2026,
+        ingest_id=None,
+    )
+    tickets = dict(db.conn.execute('SELECT dancer_id, ticket_type FROM attendance').fetchall())
+    assert tickets == {'DNC-1': 'member_or_concession', 'DNC-2': 'ordinary', 'DNC-3': None}
 
 
 # ---- Stockbridge Swingout (event-specific) parsing ----

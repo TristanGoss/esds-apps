@@ -914,6 +914,39 @@ def _concession_ticket(value) -> TicketType | None:
     return TicketType.UNKNOWN
 
 
+def _concession_by_dancer(ws) -> dict:
+    """Map dancer_id -> ticket type from a sibling 'Attendees' rollup's Concession column.
+
+    A dancecloud export's dated 'Attendees By Activity' tab (the one both the modern and the older
+    booking-export parsers ingest) carries no member-rate flag, but the workbook's plain 'Attendees'
+    rollup does — one row per booking with a Yes/No 'Concession'. Reaching across to that sibling
+    (via ``ws.parent``) is the only way to keep ticket type on these events; the rollup is otherwise
+    skipped as redundant. The flag is per-booking, so it applies to every activity the dancer
+    attended in the event. A dancer repeated across rows takes the first non-blank reading. Empty
+    when there is no such sibling or no Concession column on it (then the event carries no ticket
+    type, as before). Shared by :class:`DancecloudActivityParser` and :class:`BookingExportParser`.
+    """
+    out: dict[str, TicketType | None] = {}
+    for sib in ws.parent.worksheets:
+        if sib.title.strip().lower() != 'attendees':
+            continue
+        matrix = list(sib.iter_rows(values_only=True))
+        header = _roster_header(matrix)
+        if header is None:
+            continue
+        cols = _header_columns(matrix[header[0]])
+        did_col, conc_col = cols.get('dancer_id'), cols.get('concession')
+        if did_col is None or conc_col is None:
+            continue
+        for row in matrix[header[0] + 1 :]:
+            did = row[did_col] if did_col < len(row) else None
+            if not (isinstance(did, str) and did.startswith('DNC-')):
+                continue
+            ticket = _concession_ticket(row[conc_col]) if conc_col < len(row) else None
+            out[did] = out.get(did) or ticket
+    return out
+
+
 # Header of the per-attendee attendance marker on a one-off register. Different years use
 # different words ('Present?' on the Tea Dances, 'Attended' on the Sunday Socials). Matched
 # exactly so 'Weeks attended'/'Times attended' summary columns are never mistaken for it.
@@ -1082,7 +1115,10 @@ class BookingExportParser(Parser):
       the note refines a row to ABSENT/ATTENDED, otherwise it stays UNKNOWN.
 
     The plain 'Attendees' summary (a booking Status but no Date and no present column) is not
-    claimed: it is the same bookings as 'Attendees By Activity', minus the dates.
+    claimed: it is the same bookings as 'Attendees By Activity', minus the dates — but it is the
+    one tab carrying the member-rate 'Concession' flag, which this parser reaches across to read
+    (``_concession_by_dancer``, shared with :class:`DancecloudActivityParser`) so these older events
+    keep their ticket type.
     """
 
     name = 'booking_export'
@@ -1136,12 +1172,20 @@ class BookingExportParser(Parser):
         activity_type = _activity_type_for(term, event_type)
         difficulty = 'social' if activity_type == ActivityType.SOCIAL else _difficulty_for(term)
         raw_name = 'Social' if activity_type == ActivityType.SOCIAL else 'Lesson'
+        ticket_by_did = _concession_by_dancer(ws)
         activities: dict[str, int] = {}
         for (date_iso, did), (status, cell) in best.items():
             if date_iso not in activities:
                 name = _activity_name(raw_name, activity_type, difficulty, date_iso, event_type)
                 activities[date_iso] = db.upsert_activity(event_id, name, date_iso, activity_type, difficulty)
-            db.record_attendance(activities[date_iso], did, status=status, ingest_id=ingest_id, source_cell=cell)
+            db.record_attendance(
+                activities[date_iso],
+                did,
+                status=status,
+                ticket_type=ticket_by_did.get(did),
+                ingest_id=ingest_id,
+                source_cell=cell,
+            )
 
     @staticmethod
     def _best_status_per_pair(matrix: list[tuple], header_row: int, cols: dict, fallback_dt, title: str) -> dict:
@@ -1170,13 +1214,16 @@ class BookingExportParser(Parser):
 
 
 # A trailing date phrase on a modern dancecloud export's filename, in either order and with an
-# optional day range: 'June 7th 2026', 'March 20th-22nd 2026', '14 Dec 2023'. Stripped so the
-# event is named for what it is, not for when one instance of it ran.
+# optional day range: 'June 7th 2026', 'March 20th-22nd 2026', '14 Dec 2023'. Also the ISO export
+# stamp dancecloud actually writes — 'YYYY-MM-DD' with an optional 'HHMM' export time ('2026-06-27
+# 1153'). Stripped so the event is named for what it is, not for when one instance of it ran.
 _TITLE_DATE_TAIL_RE = re.compile(
     r'\s+(?:'
-    r'\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+'  # 14 Dec
-    r'|[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*[-–]\s*\d{1,2}(?:st|nd|rd|th)?)?'  # June 7th / March 20th-22nd
-    r')\s+\d{2,4}\s*$',
+    r'(?:\d{1,2}(?:st|nd|rd|th)?\s+[A-Za-z]+'  # 14 Dec
+    r'|[A-Za-z]+\s+\d{1,2}(?:st|nd|rd|th)?(?:\s*[-–]\s*\d{1,2}(?:st|nd|rd|th)?)?)'  # June 7th / March 20th-22nd
+    r'\s+\d{2,4}'  # ... 2023 — the year ending the prose date
+    r'|\d{4}-\d{2}-\d{2}(?:\s+\d{1,4})?'  # ISO '2026-06-27' with an optional 'HHMM' export time
+    r')\s*$',
     re.IGNORECASE,
 )
 
@@ -1209,7 +1256,9 @@ class DancecloudActivityParser(Parser):
     Distinguished from the older booking exports (handled by :class:`BookingExportParser`) purely
     by the ``Checked In`` column, which only the modern export carries; that is also why this
     parser is registered ahead of it. The sibling 'Attendees' rollup and 'Check-Ins' pivot in the
-    same workbook are the same data and are skipped as redundant by the dispatcher.
+    same workbook restate the same bookings and are skipped as redundant by the dispatcher — except
+    that the rollup is the *only* tab carrying the member-rate 'Concession' flag, which this parser
+    reaches across to read (``_concession_by_dancer``) so modern events keep their ticket type.
 
     If no row anywhere on the sheet carries a check-in (an event where the door scanner was never
     used) the column conveys nothing, so every booking is recorded UNKNOWN rather than as a
@@ -1300,6 +1349,7 @@ class DancecloudActivityParser(Parser):
         event_type = _event_type_for(term)
         event_id = db.upsert_event(_dancecloud_event_name(term, year), event_type)
 
+        ticket_by_did = _concession_by_dancer(ws)
         sessions = self._sessions(matrix, header_row, (did_col, act_col, date_col, checkin_col, status_col), ws.title)
         attended_lessons = self._attended_lessons(sessions, event_type)
 
@@ -1312,7 +1362,14 @@ class DancecloudActivityParser(Parser):
             for did, (status, attended, cell) in per.items():
                 if is_lesson and status == AttendanceStatus.ABSENT and label in attended_lessons[did]:
                     status = AttendanceStatus.ATTENDED  # scanned into this class on another day
-                db.record_attendance(activity_id, did, status=status, ingest_id=ingest_id, source_cell=cell)
+                db.record_attendance(
+                    activity_id,
+                    did,
+                    status=status,
+                    ticket_type=ticket_by_did.get(did),
+                    ingest_id=ingest_id,
+                    source_cell=cell,
+                )
                 anonymous_extra += max(attended - 1, 0)  # un-renamed duplicate tickets → anonymous heads
             if anonymous_extra:
                 db.record_count(activity_id, None, anonymous_extra, ingest_id=ingest_id, source_cell=ws.title)

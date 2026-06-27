@@ -328,6 +328,34 @@ def _booking_summary_ws(title='Attendees'):
     return ws
 
 
+def _booking_with_concession_ws(title='Attendees By Activity'):
+    """An older booking export whose workbook also carries the 'Attendees' rollup with Concession.
+
+    The dated 'Attendees By Activity' tab (returned) has no Checked In column — so the older
+    :class:`BookingExportParser` claims it — and no member-rate flag. The sibling 'Attendees'
+    rollup supplies it: DNC-1 is ordinary ('No'), DNC-2 member/concession ('Yes'), DNC-3 has no
+    rollup row so its ticket type stays unknown. The two tabs share a parent so the parser can
+    read across.
+    """
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    by_act = wb.create_sheet(title)
+    by_act['A1'], by_act['B1'], by_act['C1'], by_act['D1'] = 'dancer_id', 'Activity', 'Date', 'Status'
+    rows = [
+        ('DNC-1', datetime(2023, 1, 19, 19, 15)),
+        ('DNC-2', datetime(2023, 1, 19, 19, 15)),
+        ('DNC-3', datetime(2023, 1, 19, 19, 15)),
+    ]
+    for i, (did, dt) in enumerate(rows, start=2):
+        by_act[f'A{i}'], by_act[f'B{i}'], by_act[f'C{i}'], by_act[f'D{i}'] = did, 'Lesson', dt, 'Confirmed'
+
+    rollup = wb.create_sheet('Attendees')
+    rollup['A1'], rollup['B1'], rollup['C1'], rollup['D1'] = 'dancer_id', 'Ticket Type', 'Concession', 'Status'
+    for i, (did, conc) in enumerate([('DNC-1', 'No'), ('DNC-2', 'Yes')], start=2):
+        rollup[f'A{i}'], rollup[f'B{i}'], rollup[f'C{i}'], rollup[f'D{i}'] = did, 'Level 1 Term A', conc, 'Confirmed'
+    return by_act
+
+
 def _booking_ws_on(month: int, day: int, title='Attendees By Activity'):
     """A minimal dated booking view: one dancer, one session, on the given 2023 date."""
     wb = openpyxl.Workbook()
@@ -440,3 +468,35 @@ def _checked_in_no_scans_ws(title='Attendees By Activity'):
     ws['A3'], ws['B3'], ws['C3'], ws['D3'] = 'DNC-2', "Teachers' Workshop", on, 'Confirmed'
     ws['A4'], ws['B4'], ws['C4'], ws['D4'] = 'DNC-1', "Teachers' Workshop", on, 'Confirmed'  # extra ticket
     return ws
+
+
+def _checked_in_with_concession_ws(title='Attendees By Activity'):
+    """A modern export whose workbook also carries the 'Attendees' rollup with a Concession column.
+
+    The 'Attendees By Activity' tab (returned) holds no member-rate flag; the sibling 'Attendees'
+    rollup in the same workbook does — one row per booking with a Yes/No 'Concession'. DNC-1 is a
+    concession ('Yes' -> member/concession rate), DNC-2 an ordinary ('No'), DNC-3 has no rollup row
+    (its ticket type stays unknown). The two tabs share a parent so the parser can read across.
+    """
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    by_act = wb.create_sheet(title)
+    by_act['A1'], by_act['B1'], by_act['C1'], by_act['D1'], by_act['E1'] = (
+        'dancer_id',
+        'Activity',
+        'Date',
+        'Status',
+        'Checked In',
+    )
+    on, scan = datetime(2026, 6, 25, 19, 30), datetime(2026, 6, 25, 20, 0)
+    rows = [('DNC-1', scan), ('DNC-2', None), ('DNC-3', scan)]
+    for i, (did, checkin) in enumerate(rows, start=2):
+        by_act[f'A{i}'], by_act[f'B{i}'], by_act[f'C{i}'], by_act[f'D{i}'] = did, 'End of term dance', on, 'Confirmed'
+        if checkin is not None:
+            by_act[f'E{i}'] = checkin
+
+    rollup = wb.create_sheet('Attendees')
+    rollup['A1'], rollup['B1'], rollup['C1'], rollup['D1'] = 'dancer_id', 'Ticket Type', 'Concession', 'Status'
+    for i, (did, conc) in enumerate([('DNC-1', 'Yes'), ('DNC-2', 'No')], start=2):
+        rollup[f'A{i}'], rollup[f'B{i}'], rollup[f'C{i}'], rollup[f'D{i}'] = did, 'End of term party', conc, 'Confirmed'
+    return by_act
