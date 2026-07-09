@@ -602,7 +602,7 @@ async def serve_tracked_qr_code(request: Request, code_id: str, fmt: str):
 
 
 # Redirection endpoint that counts scans - this is the URL the qr codes target
-@app.get('/s/{code_id}')
+@app.get('/s/{code_id}', methods=['GET', 'HEAD'])
 async def tracked_qr_scan(code_id: str):
     qr_info = qr_db.get_qr_code(code_id)
     if not qr_info:
