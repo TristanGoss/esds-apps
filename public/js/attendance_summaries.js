@@ -104,6 +104,7 @@ function teamColour(teacherId) {
 // Last-rendered datasets, kept so we can re-render in place when names are unlocked or re-locked.
 let retentionData = null;
 let communitySelection = null; // { scope, minDates, dancers } of the clicked community point
+let termlySelection = null; // { scope, minActivities, termStart, label, dancers } of the clicked termly point
 
 // team.id -> legend label. Locked (or no passphrase yet): the stripped DNC- codes the server sent.
 // Unlocked: each team's teachers decrypted to first names, locally. Async because decryption is.
@@ -290,22 +291,24 @@ async function downloadCommunity(scope, minDates, btn) {
 }
 
 // Termly active community since 2026 (Plot 8): distinct dancers per term with >= 1 activity
-// (active) and >= 2 (regulars), each counted including and excluding the 30th anniversary.
+// (active) and >= 2 (regulars), each counted including and excluding the 30th anniversary. Clicking
+// a point downloads that term/threshold/scope's dancers, as on the survival curve above.
 function renderTermlyActive(points) {
   const labels = points.map((p) => p.label);
-  const line = (key, colour, dash, hollow, name) => ({
+  const line = (key, colour, dash, hollow, name, scope, minAct) => ({
     type: 'scatter', mode: 'lines+markers', name,
     x: labels, y: points.map((p) => p[key]),
+    customdata: points.map((p) => [scope, minAct, p.term_start, p.label]),
     line: { color: colour, width: 2, dash },
     marker: { size: 9, symbol: 'circle', color: hollow ? 'white' : colour, line: { color: colour, width: 2 } },
-    hovertemplate: `${name}<br>%{x}: %{y} dancers<extra></extra>`,
+    hovertemplate: `${name}<br>%{x}: %{y} dancers<br><i>click to download their ids</i><extra></extra>`,
   });
   // incl drawn first so the coincident excl marker sits on top where the two lines meet.
   const traces = [
-    line('active_incl', '#1f77b4', 'solid', false, 'active, incl. 30th (>= 1)'),
-    line('active_excl', '#d62728', 'solid', false, 'active, excl. 30th (>= 1)'),
-    line('regular_incl', '#1f77b4', 'dash', true, 'regulars, incl. 30th (>= 2)'),
-    line('regular_excl', '#d62728', 'dash', true, 'regulars, excl. 30th (>= 2)'),
+    line('active_incl', '#1f77b4', 'solid', false, 'active, incl. 30th (>= 1)', 'incl', 1),
+    line('active_excl', '#d62728', 'solid', false, 'active, excl. 30th (>= 1)', 'excl', 1),
+    line('regular_incl', '#1f77b4', 'dash', true, 'regulars, incl. 30th (>= 2)', 'incl', 2),
+    line('regular_excl', '#d62728', 'dash', true, 'regulars, excl. 30th (>= 2)', 'excl', 2),
   ];
   const layout = {
     title: 'Termly active community since 2026 (all event types)',
@@ -314,7 +317,65 @@ function renderTermlyActive(points) {
     hovermode: 'closest', legend: { x: 0.98, y: 0.98, xanchor: 'right', yanchor: 'top' },
     margin: { l: 60, r: 30, t: 50, b: 60 }, plot_bgcolor: 'white', paper_bgcolor: 'white',
   };
-  Plotly.newPlot('termly-active-chart', traces, layout, PLOT_CONFIG);
+  Plotly.newPlot('termly-active-chart', traces, layout, PLOT_CONFIG).then((gd) => {
+    gd.on('plotly_click', (ev) => {
+      const cd = ev.points[0].customdata;
+      if (!cd) return;
+      const [scope, minActivities, termStart, label] = cd;
+      termlySelection = { scope, minActivities, termStart, label, dancers: ev.points[0].y };
+      renderTermlyPanel();
+    });
+  });
+}
+
+// Render the pinned termly-download panel for the currently-selected point, mirroring the community
+// panel: locked shows a passphrase hint, unlocked shows a button that fetches, decrypts and downloads.
+function renderTermlyPanel() {
+  if (!termlySelection) return;
+  const { scope, minActivities, termStart, label, dancers } = termlySelection;
+  const body = document.getElementById('termly-active-details-body');
+  const where = scope === 'incl' ? 'including' : 'excluding';
+  const kind = minActivities >= 2 ? 'came to two or more activities' : 'attended at least once';
+  const lead =
+    `<p>${dancers} dancers ${kind} in ${label} ` +
+    `(${where} the 30th anniversary, and excluding Volunteers and the Committee).`;
+
+  if (AttendanceCrypto.isUnlocked()) {
+    body.innerHTML = lead + '<br><button type="button" id="termly-download-btn">Download (CSV)</button></p>';
+    document.getElementById('termly-download-btn').addEventListener('click', (ev) => {
+      downloadTermly(termStart, scope, minActivities, label, ev.currentTarget);
+    });
+  } else {
+    body.innerHTML =
+      lead + '<br><em>Enter the passphrase at the top of the page to download these dancers.</em></p>';
+  }
+  document.getElementById('termly-active-details').hidden = false;
+}
+
+async function downloadTermly(termStart, scope, minActivities, label, btn) {
+  btn.setAttribute('aria-busy', 'true');
+  try {
+    const url =
+      `/attendance/community/term-dancers.json?term_start=${termStart}&scope=${scope}&min_activities=${minActivities}`;
+    const resp = await fetch(url, { credentials: 'same-origin', cache: 'no-store' });
+    const payload = await resp.json();
+    if (!resp.ok) throw new Error(payload.error || 'Could not load the dancer list.');
+    const rows = [];
+    for (const d of payload.dancers) {
+      const name = await AttendanceCrypto.decryptName(d.enc_name);
+      rows.push([d.dancer_id, (name && name.first_name) || '', (name && name.last_name) || '']);
+    }
+    const safeLabel = label.replace(/[^0-9a-z]+/gi, '_');
+    AttendanceCrypto.downloadCsv(
+      `termly_active_${safeLabel}_${scope}_30th_min${minActivities}_activities.csv`,
+      ['dancer_id', 'first_name', 'last_name'],
+      rows
+    );
+  } catch (e) {
+    alert('Download failed: ' + e.message);
+  } finally {
+    btn.removeAttribute('aria-busy');
+  }
 }
 
 async function renderSummaries() {
@@ -343,6 +404,7 @@ async function renderSummaries() {
   AttendanceCrypto.onChange(() => {
     if (retentionData) renderCohortRetention(retentionData);
     renderCommunityPanel();
+    renderTermlyPanel();
   });
 }
 

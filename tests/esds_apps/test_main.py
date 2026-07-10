@@ -422,6 +422,38 @@ def test_attendance_community_dancers_requires_auth(client):
     assert response.status_code == HTTPStatus.UNAUTHORIZED
 
 
+def test_attendance_community_term_dancers_json(auth_client, monkeypatch):
+    captured = {}
+
+    def fake(term_start, scope, min_activities):
+        captured['args'] = (term_start, scope, min_activities)
+        return [{'dancer_id': 'DNC-AAAA1111', 'enc_name': 'gAAAA-1'}, {'dancer_id': 'DNC-BBBB2222', 'enc_name': None}]
+
+    monkeypatch.setattr('esds_apps.main.analysis.termly_active_dancer_rows', fake)
+    response = auth_client.get(
+        '/attendance/community/term-dancers.json?term_start=2026-01-08&scope=excl&min_activities=2'
+    )
+    assert response.status_code == HTTPStatus.OK
+    assert response.headers['cache-control'] == 'no-store'
+    assert captured['args'] == ('2026-01-08', 'excl', 2)
+    body = response.json()
+    assert body['term_start'] == '2026-01-08' and body['scope'] == 'excl' and body['min_activities'] == 2
+    assert [d['dancer_id'] for d in body['dancers']] == ['DNC-AAAA1111', 'DNC-BBBB2222']
+    assert body['dancers'][0]['enc_name'] == 'gAAAA-1'
+
+
+def test_attendance_community_term_dancers_rejects_bad_term_start(auth_client):
+    response = auth_client.get(
+        '/attendance/community/term-dancers.json?term_start=not-a-date&scope=incl&min_activities=1'
+    )
+    assert response.status_code == HTTPStatus.UNPROCESSABLE_ENTITY
+
+
+def test_attendance_community_term_dancers_requires_auth(client):
+    response = client.get('/attendance/community/term-dancers.json?term_start=2026-01-08&scope=incl&min_activities=1')
+    assert response.status_code == HTTPStatus.UNAUTHORIZED
+
+
 def test_attendance_decrypt_params(auth_client, monkeypatch):
     monkeypatch.setattr(
         'esds_apps.main.analysis.decrypt_params', lambda: {'salt': 'ab12', 'sentinel': 'gAAAA-sentinel'}

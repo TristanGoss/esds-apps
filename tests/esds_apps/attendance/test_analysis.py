@@ -190,6 +190,27 @@ def test_termly_active_empty_without_a_2026_term(built_db):
     assert analysis.summaries()['termly_active'] == []
 
 
+def test_termly_active_dancer_rows_by_threshold_and_scope(termly_db):
+    term_start = analysis.summaries()['termly_active'][0]['term_start']
+
+    def ids(scope, min_activities):
+        return _ids(analysis.termly_active_dancer_rows(term_start, scope, min_activities))
+
+    # active (>= 1): the anniversary-only dancer b1 counts incl but not excl.
+    assert ids('incl', 1) == ['a1', 'a2', 'b1', 'c1']
+    assert ids('excl', 1) == ['a1', 'a2', 'c1']
+    # regulars (>= 2): c1 only reaches two activities by counting the anniversary, so drops from excl.
+    assert ids('incl', 2) == ['a1', 'a2', 'c1']
+    assert ids('excl', 2) == ['a1', 'a2']
+    # enc_name slot is always present (None here: this fixture seeds no encrypted identities).
+    assert all('enc_name' in r for r in analysis.termly_active_dancer_rows(term_start, 'incl', 1))
+
+
+def test_termly_active_dancer_rows_unknown_term(termly_db):
+    # A term_start matching no term yields an empty list rather than raising.
+    assert analysis.termly_active_dancer_rows('2019-09-01', 'incl', 1) == []
+
+
 def _ids(rows):
     return [r['dancer_id'] for r in rows]
 
@@ -238,6 +259,8 @@ def test_community_and_activity_dancers_missing_db_raise(tmp_path, monkeypatch):
     monkeypatch.setattr(analysis.config, 'ATTENDANCE_DB_PATH', tmp_path / 'nope.sqlite')
     with pytest.raises(FileNotFoundError):
         analysis.community_2026_dancer_rows('incl', 1)
+    with pytest.raises(FileNotFoundError):
+        analysis.termly_active_dancer_rows('2026-01-01', 'incl', 1)
     with pytest.raises(FileNotFoundError):
         analysis.activity_records(1)
     with pytest.raises(FileNotFoundError):

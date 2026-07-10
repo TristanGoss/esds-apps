@@ -284,13 +284,8 @@ def _community_2026(conn: sqlite3.Connection) -> dict:
     }
 
 
-def _termly_active_community(conn: sqlite3.Connection, terms: pd.DataFrame, assign) -> list[dict]:
-    """Plot 8: distinct active dancers per term since 2026, across all event types, incl/excl the 30th.
-
-    For every term whose start falls on or after the Level 2 names began (January 2026), two
-    thresholds are counted: dancers with at least one attended activity that term ("active") and
-    those with at least two ("regulars").
-    """
+def _termly_activity_counts(conn: sqlite3.Connection, assign) -> pd.DataFrame:
+    """Distinct activities each dancer attended in each term, with and without the 30th weekender."""
     att = pd.read_sql_query(
         "SELECT at.dancer_id, a.date, a.activity_id, (e.name LIKE '%30 Years%') AS is_30th "
         'FROM attendance at JOIN activity a USING(activity_id) JOIN event e USING(event_id) '
@@ -302,29 +297,46 @@ def _termly_active_community(conn: sqlite3.Connection, terms: pd.DataFrame, assi
     att = att.dropna(subset=['term_idx'])
     att['term_idx'] = att['term_idx'].astype(int)
 
-    # Distinct activities per dancer per term, counted with and without the weekender. A dancer with
-    # no non-30th activity that term gets n_excl = 0 (from the fill) and so drops out of the excl lines.
-    n_incl = att.groupby(['term_idx', 'dancer_id'])['activity_id'].nunique()
-    n_excl = att[att['is_30th'] == 0].groupby(['term_idx', 'dancer_id'])['activity_id'].nunique()
+    n_incl = att.groupby(['term_idx', 'dancer_id'])['activity_id'].nunique().rename('n_incl')
+    n_excl = att[att['is_30th'] == 0].groupby(['term_idx', 'dancer_id'])['activity_id'].nunique().rename('n_excl')
+    return pd.concat([n_incl, n_excl], axis=1).fillna(0).astype(int)
 
-    def dancers_per_term(counts: pd.Series, threshold: int) -> pd.Series:
-        hit = counts[counts >= threshold]
+
+def _termly_active_community(conn: sqlite3.Connection, terms: pd.DataFrame, assign) -> list[dict]:
+    """Plot 8: distinct active dancers per term since 2026, across all event types, incl/excl the 30th.
+
+    For every term whose start falls on or after the Level 2 names began (January 2026), two
+    thresholds are counted: dancers with at least one attended activity that term ("active") and
+    those with at least two ("regulars"). Each carries ``term_start`` so a click can fetch exactly
+    that point's dancers.
+    """
+    counts = _termly_activity_counts(conn, assign)
+
+    def dancers_per_term(col: str, threshold: int) -> pd.Series:
+        hit = counts[counts[col] >= threshold]
         return hit.reset_index().groupby('term_idx')['dancer_id'].nunique()
 
     m = terms.set_index('term_idx')
-    for name, counts, threshold in (
-        ('active_incl', n_incl, 1),
-        ('active_excl', n_excl, 1),
-        ('regular_incl', n_incl, 2),
-        ('regular_excl', n_excl, 2),
+    for name, col, threshold in (
+        ('active_incl', 'n_incl', 1),
+        ('active_excl', 'n_excl', 1),
+        ('regular_incl', 'n_incl', 2),
+        ('regular_excl', 'n_excl', 2),
     ):
-        m = m.join(dancers_per_term(counts, threshold).rename(name))
+        m = m.join(dancers_per_term(col, threshold).rename(name))
 
     value_cols = ['active_incl', 'active_excl', 'regular_incl', 'regular_excl']
     m = m[m['term_start'] >= pd.Timestamp(_FIRST_L2_NAMES_DATE)].sort_values('term_start')
     m[value_cols] = m[value_cols].fillna(0).astype(int)
 
-    return [{'label': r.label, **{c: int(getattr(r, c)) for c in value_cols}} for r in m.itertuples()]
+    return [
+        {
+            'label': r.label,
+            'term_start': r.term_start.strftime('%Y-%m-%d'),
+            **{c: int(getattr(r, c)) for c in value_cols},
+        }
+        for r in m.itertuples()
+    ]
 
 
 def community_2026_dancer_rows(scope: str, min_dates: int) -> list[dict]:
@@ -344,6 +356,36 @@ def community_2026_dancer_rows(scope: str, min_dates: int) -> list[dict]:
             raw = raw[raw['is_30th'] == 0]
         per_dancer = raw.groupby('dancer_id')['date'].nunique()
         ids = sorted(per_dancer[per_dancer >= min_dates].index.tolist())
+        enc = _enc_names(conn, ids)
+    finally:
+        conn.close()
+    return [{'dancer_id': i, 'enc_name': enc.get(i)} for i in ids]
+
+
+def termly_active_dancer_rows(term_start: str, scope: str, min_activities: int) -> list[dict]:
+    """(dancer_id, enc_name) for dancers who attended >= ``min_activities`` activities in one term.
+
+    ``term_start`` (YYYY-MM-DD) identifies the term by its start date -- the key the chart carries on
+    each point -- and ``scope`` is 'incl' or 'excl' for whether the 30th anniversary weekender counts
+    toward the total. ``enc_name`` is the Fernet ciphertext the browser decrypts, so the server never
+    emits plaintext. Backs the click-to-download on the termly community chart. Returns [] for a
+    ``term_start`` that matches no term. Raises FileNotFoundError if the database is absent.
+    """
+    if not Path(config.ATTENDANCE_DB_PATH).exists():
+        raise FileNotFoundError(config.ATTENDANCE_DB_PATH)
+    conn = sqlite3.connect(config.ATTENDANCE_DB_PATH)
+    try:
+        terms, assign = _term_calendar(conn)
+        match = terms[terms['term_start'] == pd.Timestamp(term_start)]
+        counts = _termly_activity_counts(conn, assign)
+        if match.empty or counts.empty:
+            return []
+        term_idx = int(match['term_idx'].iloc[0])
+        if term_idx not in counts.index.get_level_values('term_idx'):
+            return []
+        term_counts = counts.xs(term_idx, level='term_idx')
+        col = 'n_excl' if scope == 'excl' else 'n_incl'
+        ids = sorted(term_counts[term_counts[col] >= min_activities].index.tolist())
         enc = _enc_names(conn, ids)
     finally:
         conn.close()

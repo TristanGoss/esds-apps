@@ -253,6 +253,35 @@ async def attendance_community_dancers(
     return JSONResponse({'scope': scope, 'min_dates': min_dates, 'dancers': dancers}, headers=_NO_STORE)
 
 
+@app.get('/attendance/community/term-dancers.json')
+async def attendance_community_term_dancers(
+    request: Request,
+    term_start: str = Query(pattern=r'^\d{4}-\d{2}-\d{2}$'),
+    scope: str = Query(pattern='^(incl|excl)$'),
+    min_activities: int = Query(ge=1),
+    _: None = Depends(require_valid_cookie),
+):
+    """Dancers who attended at least ``min_activities`` activities in one teaching term, as ciphertext.
+
+    Backs the click-to-download on the termly active-community chart. ``term_start`` (YYYY-MM-DD)
+    picks the term by its start date; ``scope`` is 'incl' or 'excl' for whether the 30th anniversary
+    weekender counts. Each row is ``{dancer_id, enc_name}``; the browser decrypts ``enc_name`` into
+    the CSV's name columns. ``no-store`` so the ciphertext isn't cached.
+    """
+    try:
+        dancers = analysis.termly_active_dancer_rows(term_start, scope, min_activities)
+    except FileNotFoundError:
+        log.warning('Attendance database not found at %s', config.ATTENDANCE_DB_PATH)
+        return JSONResponse(
+            {'error': 'The attendance database has not been built yet.'},
+            status_code=HTTPStatus.SERVICE_UNAVAILABLE,
+        )
+    return JSONResponse(
+        {'term_start': term_start, 'scope': scope, 'min_activities': min_activities, 'dancers': dancers},
+        headers=_NO_STORE,
+    )
+
+
 @app.api_route('/health', methods=['GET', 'HEAD'])
 async def health():
     return {'status': 'ok'}
