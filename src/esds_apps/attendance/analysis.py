@@ -284,6 +284,49 @@ def _community_2026(conn: sqlite3.Connection) -> dict:
     }
 
 
+def _termly_active_community(conn: sqlite3.Connection, terms: pd.DataFrame, assign) -> list[dict]:
+    """Plot 8: distinct active dancers per term since 2026, across all event types, incl/excl the 30th.
+
+    For every term whose start falls on or after the Level 2 names began (January 2026), two
+    thresholds are counted: dancers with at least one attended activity that term ("active") and
+    those with at least two ("regulars").
+    """
+    att = pd.read_sql_query(
+        "SELECT at.dancer_id, a.date, a.activity_id, (e.name LIKE '%30 Years%') AS is_30th "
+        'FROM attendance at JOIN activity a USING(activity_id) JOIN event e USING(event_id) '
+        "WHERE at.status = 'attended'",
+        conn,
+        parse_dates=['date'],
+    )
+    att['term_idx'] = assign(att['date'])
+    att = att.dropna(subset=['term_idx'])
+    att['term_idx'] = att['term_idx'].astype(int)
+
+    # Distinct activities per dancer per term, counted with and without the weekender. A dancer with
+    # no non-30th activity that term gets n_excl = 0 (from the fill) and so drops out of the excl lines.
+    n_incl = att.groupby(['term_idx', 'dancer_id'])['activity_id'].nunique()
+    n_excl = att[att['is_30th'] == 0].groupby(['term_idx', 'dancer_id'])['activity_id'].nunique()
+
+    def dancers_per_term(counts: pd.Series, threshold: int) -> pd.Series:
+        hit = counts[counts >= threshold]
+        return hit.reset_index().groupby('term_idx')['dancer_id'].nunique()
+
+    m = terms.set_index('term_idx')
+    for name, counts, threshold in (
+        ('active_incl', n_incl, 1),
+        ('active_excl', n_excl, 1),
+        ('regular_incl', n_incl, 2),
+        ('regular_excl', n_excl, 2),
+    ):
+        m = m.join(dancers_per_term(counts, threshold).rename(name))
+
+    value_cols = ['active_incl', 'active_excl', 'regular_incl', 'regular_excl']
+    m = m[m['term_start'] >= pd.Timestamp(_FIRST_L2_NAMES_DATE)].sort_values('term_start')
+    m[value_cols] = m[value_cols].fillna(0).astype(int)
+
+    return [{'label': r.label, **{c: int(getattr(r, c)) for c in value_cols}} for r in m.itertuples()]
+
+
 def community_2026_dancer_rows(scope: str, min_dates: int) -> list[dict]:
     """(dancer_id, enc_name) for dancers who attended at least ``min_dates`` unique dates in 2026.
 
@@ -437,6 +480,7 @@ def summaries() -> dict:
             'level2_socials': _level2_and_socials(conn, terms, assign),
             'cohort_retention': _cohort_retention(conn, terms, assign),
             'community_2026': _community_2026(conn),
+            'termly_active': _termly_active_community(conn, terms, assign),
         }
     finally:
         conn.close()

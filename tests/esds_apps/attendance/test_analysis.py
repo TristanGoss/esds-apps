@@ -81,9 +81,44 @@ def built_db(tmp_path, monkeypatch):
     return path
 
 
+@pytest.fixture
+def termly_db(tmp_path, monkeypatch):
+    """A DB with a single 2026-anchored term, for the termly active-community builder (Plot 8).
+
+    A Level 1 course anchors one 2026 term; a 30th anniversary weekender falls inside it so the
+    incl/excl views differ. Attendance is set per dancer so all four counts come out distinct:
+      a2 -> all four L1 lessons          (regular in both views)
+      a1 -> two L1 lessons + anniversary (regular in both)
+      c1 -> one L1 lesson  + anniversary (regular incl only; active excl)
+      b1 -> anniversary only             (active incl only; absent from excl)
+    So for the one term: active incl/excl = 4/3, regulars incl/excl = 3/2.
+    """
+    path = tmp_path / 'attendance.sqlite'
+    db = open_db(path, enforce_foreign_keys=False)
+
+    event_id = db.upsert_event('L1 Spring 2026', EventType.COURSE)
+    day = datetime.date(2026, 1, 13)
+    lessons = []
+    for week in range(4):  # four lessons so the L1 block anchors a term
+        lessons.append(db.upsert_activity(event_id, f'L1 wk{week}', day, ActivityType.LESSON, 'Level 1'))
+        day += datetime.timedelta(days=7)
+    for dancer, n in (('a2', 4), ('a1', 2), ('c1', 1)):
+        for activity_id in lessons[:n]:
+            db.record_attendance(activity_id, dancer, AttendanceStatus.ATTENDED)
+
+    anniv = db.upsert_event('30 Years of ESDS', EventType.WEEKENDER)
+    anniv_act = db.upsert_activity(anniv, '30th party', datetime.date(2026, 3, 20), ActivityType.SOCIAL, None)
+    for dancer in ('a1', 'c1', 'b1'):
+        db.record_attendance(anniv_act, dancer, AttendanceStatus.ATTENDED)
+    db.close()
+
+    monkeypatch.setattr(analysis.config, 'ATTENDANCE_DB_PATH', path)
+    return path
+
+
 def test_summaries_top_level_shape(built_db):
     s = analysis.summaries()
-    assert set(s) == {'beginner_intake', 'level2_socials', 'cohort_retention', 'community_2026'}
+    assert set(s) == {'beginner_intake', 'level2_socials', 'cohort_retention', 'community_2026', 'termly_active'}
 
 
 def test_beginner_intake_groups_by_year(built_db):
@@ -136,6 +171,23 @@ def test_community_2026_size_and_commitment(built_db):
     assert excl[0]['dancers'] == 3
     # pct uses the fixed 5-date denominator: 1 date -> 20%.
     assert incl[0]['pct'] == 20.0
+
+
+def test_termly_active_counts_split_by_threshold_and_anniversary(termly_db):
+    rows = analysis.summaries()['termly_active']
+    assert len(rows) == 1  # one term starts in 2026
+    r = rows[0]
+    assert r['label']
+    # active (>= 1): the anniversary-only dancer (b1) shows in incl but not excl.
+    assert (r['active_incl'], r['active_excl']) == (4, 3)
+    # regulars (>= 2): c1 reaches two activities only by counting the anniversary, so drops from excl.
+    assert (r['regular_incl'], r['regular_excl']) == (3, 2)
+
+
+def test_termly_active_empty_without_a_2026_term(built_db):
+    # built_db folds its 2026 activity into the 2025-anchored term, so no term *starts* in 2026 and
+    # the chart -- which filters on term start, as the notebook does -- has nothing to show.
+    assert analysis.summaries()['termly_active'] == []
 
 
 def _ids(rows):

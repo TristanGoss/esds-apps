@@ -3,7 +3,9 @@
 // port of the matplotlib charts in working/attendance.ipynb). Three charts:
 //   1. beginner (Level 1) intake per term, one line per academic year (solid attended / dashed registered);
 //   2. Level 2 class attendance per term with the paired social-only turnout (solid / dashed);
-//   3. cohort-retention heatmap with a teaching-team strip down the joining-cohort axis.
+//   3. cohort-retention heatmap with a teaching-team strip down the joining-cohort axis;
+//   4. the 2026 community survival curve (with / without the 30th anniversary);
+//   5. termly active-community counts since 2026 (active >= 1 / regulars >= 2, incl / excl the 30th).
 
 // Matplotlib's tab10, so a given academic year / team keeps the same colour as in the notebook.
 const TAB10 = [
@@ -287,6 +289,34 @@ async function downloadCommunity(scope, minDates, btn) {
   }
 }
 
+// Termly active community since 2026 (Plot 8): distinct dancers per term with >= 1 activity
+// (active) and >= 2 (regulars), each counted including and excluding the 30th anniversary.
+function renderTermlyActive(points) {
+  const labels = points.map((p) => p.label);
+  const line = (key, colour, dash, hollow, name) => ({
+    type: 'scatter', mode: 'lines+markers', name,
+    x: labels, y: points.map((p) => p[key]),
+    line: { color: colour, width: 2, dash },
+    marker: { size: 9, symbol: 'circle', color: hollow ? 'white' : colour, line: { color: colour, width: 2 } },
+    hovertemplate: `${name}<br>%{x}: %{y} dancers<extra></extra>`,
+  });
+  // incl drawn first so the coincident excl marker sits on top where the two lines meet.
+  const traces = [
+    line('active_incl', '#1f77b4', 'solid', false, 'active, incl. 30th (>= 1)'),
+    line('active_excl', '#d62728', 'solid', false, 'active, excl. 30th (>= 1)'),
+    line('regular_incl', '#1f77b4', 'dash', true, 'regulars, incl. 30th (>= 2)'),
+    line('regular_excl', '#d62728', 'dash', true, 'regulars, excl. 30th (>= 2)'),
+  ];
+  const layout = {
+    title: 'Termly active community since 2026 (all event types)',
+    xaxis: { title: 'teaching term', type: 'category', ...GRID },
+    yaxis: { title: 'distinct dancers', rangemode: 'tozero', ...GRID },
+    hovermode: 'closest', legend: { x: 0.98, y: 0.98, xanchor: 'right', yanchor: 'top' },
+    margin: { l: 60, r: 30, t: 50, b: 60 }, plot_bgcolor: 'white', paper_bgcolor: 'white',
+  };
+  Plotly.newPlot('termly-active-chart', traces, layout, PLOT_CONFIG);
+}
+
 async function renderSummaries() {
   const status = document.getElementById('summary-status');
   let payload;
@@ -306,6 +336,7 @@ async function renderSummaries() {
   renderLevel2Socials(payload.level2_socials || []);
   await renderCohortRetention(payload.cohort_retention || { terms: [], matrix: [], teams: [], teacher_enc: {} });
   renderCommunity2026(payload.community_2026 || { total_dates: 0, incl_30th: [], excl_30th: [] });
+  renderTermlyActive(payload.termly_active || []);
 
   // When names are unlocked or re-locked, retranslate the retention legend and refresh the
   // community download panel (the scatter download handles itself in attendance.js).
