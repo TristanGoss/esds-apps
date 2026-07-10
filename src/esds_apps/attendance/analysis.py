@@ -110,15 +110,21 @@ def _term_calendar(conn: sqlite3.Connection):
 
 
 def _beginner_intake(conn: sqlite3.Connection, terms: pd.DataFrame, assign) -> list[dict]:
-    """Plot 2: mean Level 1 attendance and registrations per term, grouped by academic year."""
+    """Plot 2: mean Level 1 attendance and registrations (+ waitlist) per term, by academic year."""
     l1 = pd.read_sql_query(
-        "SELECT date, total, named_registered FROM activity_attendance WHERE difficulty = 'Level 1'",
+        "SELECT event_id, date, total, named_registered FROM activity_attendance WHERE difficulty = 'Level 1'",
         conn,
         parse_dates=['date'],
     )
+    wl = pd.read_sql_query('SELECT event_id, COUNT(*) AS waitlisted FROM waitlist GROUP BY event_id', conn)
     l1['term_idx'] = assign(l1['date'])
     per_term = l1.groupby('term_idx')[['total', 'named_registered']].mean()
+    ev_term = l1.groupby('event_id')['term_idx'].first()
+    wl_term = wl.join(ev_term, on='event_id').groupby('term_idx')['waitlisted'].sum()
     m = terms.set_index('term_idx').join(per_term).dropna(subset=['total'])
+    m = m.join(wl_term)
+    m['waitlisted'] = m['waitlisted'].fillna(0)
+    m['registered'] = m['named_registered'] + m['waitlisted']
     m = m[m['acad_year'] >= _FIRST_TURNOUT_ACAD_YEAR]
 
     out = []
@@ -130,7 +136,7 @@ def _beginner_intake(conn: sqlite3.Connection, terms: pd.DataFrame, assign) -> l
                 'label': _acad_year_label(int(ay)),
                 'points': [
                     {'term_num': int(tn), 'attended': float(a), 'registered': float(r)}
-                    for tn, a, r in zip(g['term_num'], g['total'], g['named_registered'])
+                    for tn, a, r in zip(g['term_num'], g['total'], g['registered'])
                 ],
             }
         )

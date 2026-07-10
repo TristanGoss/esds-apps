@@ -46,7 +46,7 @@ def built_db(tmp_path, monkeypatch):
     teachers_b = ['DNC-CCCC3333', 'DNC-DDDD4444']
 
     # 2024/25 term 1: five L1 and L2 dancers, a social, taught by team A.
-    _add_course(
+    l1_autumn_2024 = _add_course(
         db,
         'L1 Autumn 2024',
         'Level 1',
@@ -56,6 +56,8 @@ def built_db(tmp_path, monkeypatch):
         teachers=teachers_a,
         social_with=['d1', 'd2'],
     )
+    db.record_waitlist(l1_autumn_2024, 'DNC-WAIT0001')  # two waitlisted for the autumn L1 course
+    db.record_waitlist(l1_autumn_2024, 'DNC-WAIT0002')
     _add_course(db, 'L2 Autumn 2024', 'Level 2', t1, 4, ['e1', 'e2', 'e3'])
     # 2024/25 term 2: d1/d2 return (retained), taught by team B.
     _add_course(db, 'L1 Winter 2024', 'Level 1', t2, 4, ['d1', 'd2', 'd6'], teachers=teachers_b)
@@ -127,10 +129,21 @@ def test_beginner_intake_groups_by_year(built_db):
     # Two terms ingested in 2024/25, one in 2025/26.
     assert len(years['24/25']['points']) == 2
     assert len(years['25/26']['points']) == 1
-    # Attended (5 named) <= registered (also 5 here); both populated and positive.
+    # Attended (5 named) < registered: 5 named registrations + 2 waitlisted folded in.
     p = years['24/25']['points'][0]
     assert p['term_num'] == 1
-    assert p['attended'] > 0 and p['registered'] > 0
+    assert p['attended'] == 5.0
+    assert p['registered'] == 7.0  # 5 registered + 2 waitlisted
+
+
+def test_beginner_intake_folds_waitlist_into_registered(built_db):
+    """The dashed 'registered' series adds the course's per-event waitlist on top of registrations."""
+    term1 = {y['label']: y for y in analysis.summaries()['beginner_intake']}['24/25']['points'][0]
+    # 5 dancers registered on every lesson; 2 waitlisters for the event; no one turned away in later terms.
+    assert term1['registered'] - term1['attended'] == 2.0
+    # A term with no waitlist keeps registered == attended (all 5 present, none waitlisted).
+    term25 = {y['label']: y for y in analysis.summaries()['beginner_intake']}['25/26']['points'][0]
+    assert term25['registered'] == term25['attended']
 
 
 def test_level2_socials_only_show_paired_socials_from_2024(built_db):

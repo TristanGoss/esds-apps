@@ -22,6 +22,9 @@ so far:
   and an optional Concession flag; the date comes from the tab name or filename.
 * **Booking export** — a dancecloud booking export listing who *bought a ticket*, not who
   turned up; every booking is recorded UNKNOWN unless a status/present note says otherwise.
+* **Waitlist** — a dancecloud 'Wait List' export's 'Applicants' tab: who wanted a place at a
+  (full) event but didn't get one. Recorded in the ``waitlist`` table, apart from attendance;
+  the event is resolved through a hand-curated (title, year) map.
 
 Every concrete parser subclasses :class:`Parser`, which fixes the ``name``/``matches``/``parse``
 contract the dispatcher relies on. The module-level helpers are shared across parsers, and the
@@ -1529,6 +1532,105 @@ class StockbridgeSwingoutParser(Parser):
 
 
 # ---------------------------------------------------------------------------
+# Waitlist layout (dancecloud 'Wait List' exports)
+# ---------------------------------------------------------------------------
+
+
+# A waitlist export names its dancecloud event in the filename, but that booking title rarely
+# matches the event name the attendance ingest settled on: a termly course is named for its
+# month window ('Levels 1-2 (Feb-Mar 2024) Level 1 (2024)'), not for the booking's 'Beginners
+# Level 1 Lindy Hop 6 week block'. There is no shared key to derive one from the other, so the
+# thirteen historical waitlists are mapped by hand, keyed on (booking title, year) — the year,
+# resolved from the applicants' Joined dates, separates the two same-named 'Term A' files (2022
+# vs 2023). The value is the exact event name; it is looked up (never created), so a name that
+# has drifted since this table was written fails loudly instead of spawning an empty event.
+_WAITLIST_EVENTS: dict[tuple[str, int], str] = {
+    ('30 Years of Edinburgh Swing Dance Society', 2026): '30 Years of Edinburgh Swing Dance Society (2026)',
+    ('Beginners Level 1 Lindy Hop 6 week block', 2024): 'Levels 1-2 (Feb-Mar 2024) Level 1 (2024)',
+    ('Beginners Level 1- six week block of Lindy Hop classes', 2025): 'Jan-Feb 2025 Level 1 (2025)',
+    ('Christmas End of Term Band Social Dance', 2022): 'Christmas End of Term Band Social Dance (2022)',
+    (
+        'Christmas Party with Ian Ewing and the Chevaliers',
+        2023,
+    ): 'Christmas Party with Ian Ewing and the Chevaliers (2023)',
+    ('Christmas Party with the Castle Rock Jazz Band', 2024): 'Nov-Dec 2024: Christmas Party 19th Dec',
+    ('Level 1 - 5 week block', 2023): 'Levels 1-3 (Oct-Nov 2023) Level 1 (2023)',
+    ('Level 1 Beginners Lindy Hop', 2024): 'Levels 1-2 (Jan-Feb 2024) Level 1 (2024)',
+    ('Level 1 Fundamentals Term A', 2023): 'Level 1 Fundamentals Term A (Jan-Feb 2023)',
+    ('Level 1 Fundamentals Term A', 2022): 'Level 1 Fundamentals Term A (Sep-Oct 2022)',
+    ('Level 1 Fundamentals Term B', 2022): 'Level 1 Fundamentals Term B (Nov-Dec 2022)',
+    ('Level 1 Term B', 2023): 'Level 1 Term B (Mar-Apr 2023)',
+    ('The Stockbridge Swingout', 2025): 'Sept-Oct 2025: Stockbridge Swingout',
+}
+
+
+def _waitlist_title(term: str) -> str:
+    """The dancecloud event title from a waitlist file's term: the text before ' Wait List'."""
+    return re.split(r'\s+wait\s*list\b', term, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+
+
+class WaitlistParser(Parser):
+    """Parse a dancecloud waitlist export's 'Applicants' tab into the ``waitlist`` table.
+
+    A waitlist file has two tabs: 'Applicants' (one row per dancer — ``dancer_id``, ``Status``,
+    ``Joined``, ``Fails``) and 'Ticket Requests' (one row per requested ticket type, so a dancer
+    who asked for two ticket types appears twice). We ingest the 'Applicants' tab: it already
+    holds each waitlister exactly once, which is the grain the per-event ``waitlist`` table wants
+    (a dancer wanted *in*, regardless of how many ticket types they asked for). 'Ticket Requests'
+    is skipped by the dispatcher as redundant.
+
+    Every applicant is a named ``DNC-`` dancer, so each becomes a named waitlist row; there are no
+    anonymous counts here. All statuses present ('Waiting' and 'Suspended' — a housekeeping state
+    after lapsed offers, not a withdrawal) are recorded: both mean the dancer wanted a place they
+    couldn't get. The event is resolved through :data:`_WAITLIST_EVENTS`; an unmapped file, or a
+    mapped name absent from the DB, raises rather than silently attaching waitlisters to nothing.
+    """
+
+    name = 'waitlist'
+
+    def matches(self, ws) -> bool:
+        """True for a waitlist 'Applicants' tab: a dancer_id header carrying 'Joined' and 'Fails'.
+
+        'Fails' is unique to this tab, so the sibling 'Ticket Requests' (Leads/Follows, no Fails)
+        is not claimed here, and no attendance layout is mistaken for a waitlist.
+        """
+        matrix = list(ws.iter_rows(values_only=True))
+        header = _roster_header(matrix)
+        if header is None:
+            return False
+        cols = _header_columns(matrix[header[0]])
+        return 'joined' in cols and 'fails' in cols
+
+    def parse(
+        self,
+        ws,
+        db: AttendanceDb,
+        term: str,
+        year: int | None,
+        ingest_id: int | None,
+        week_anchor: datetime | None = None,
+    ) -> None:
+        """Ingest one waitlist 'Applicants' tab: a named waitlist row per applicant."""
+        title = _waitlist_title(term)
+        event_name = _WAITLIST_EVENTS.get((title, year))
+        if event_name is None:
+            raise ValueError(f'No event mapping for waitlist {title!r} ({year}); add it to _WAITLIST_EVENTS.')
+        event_id = db.event_id_by_name(event_name)
+        if event_id is None:
+            raise ValueError(f'Waitlist {title!r} maps to event {event_name!r}, which is not in the database.')
+
+        matrix = list(ws.iter_rows(values_only=True))
+        header_row, dancer_col = _roster_header(matrix)
+        for r in range(header_row + 1, len(matrix)):
+            row = matrix[r]
+            did = row[dancer_col] if dancer_col < len(row) else None
+            if not (isinstance(did, str) and did.startswith('DNC-')):
+                continue
+            cell = f'{ws.title}!{get_column_letter(dancer_col + 1)}{r + 1}'
+            db.record_waitlist(event_id, dancer_id=did, ingest_id=ingest_id, source_cell=cell)
+
+
+# ---------------------------------------------------------------------------
 # Canonical event / activity naming
 #
 # One term's course is described by several sheets (a weekly roster, a Level 2 tally, the
@@ -1658,4 +1760,5 @@ PARSERS: list[Parser] = [
     SocialRegisterParser(),
     DancecloudActivityParser(),
     BookingExportParser(),
+    WaitlistParser(),
 ]

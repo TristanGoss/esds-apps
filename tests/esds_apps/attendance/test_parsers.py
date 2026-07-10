@@ -4,6 +4,7 @@ import openpyxl
 import pytest
 
 from esds_apps.attendance import parsers
+from esds_apps.attendance.attendance_db import EventType
 
 from .workbooks import (
     _attended_register_ws,
@@ -31,6 +32,8 @@ from .workbooks import (
     _swingout_ws,
     _tally_ws,
     _teachers_choice_tally_ws,
+    _waitlist_applicants_ws,
+    _waitlist_ticket_requests_ws,
 )
 
 # ---- value helpers ----
@@ -966,3 +969,49 @@ def test_stockbridge_expands_each_ticket_into_its_weekend_activities(db):
     assert db.conn.execute(
         'SELECT a.name, ac.head_count FROM attendance_count ac JOIN activity a USING(activity_id)'
     ).fetchall() == [('Saturday Social', 2)]
+
+
+# ---- waitlist parsing ----
+
+
+def test_waitlist_matches_applicants_tab_only():
+    p = parsers.WaitlistParser()
+    assert p.matches(_waitlist_applicants_ws())  # dancer_id header with 'Joined' and 'Fails'
+    assert not p.matches(_waitlist_ticket_requests_ws())  # sibling has no 'Fails' column
+    assert not p.matches(_roster_ws())  # an attendance roster is not a waitlist
+    assert not p.matches(_booking_summary_ws())  # a booking rollup has no 'Fails' column
+
+
+def test_waitlist_title_strips_the_wait_list_tail():
+    assert parsers._waitlist_title('Level 1 Term B Wait List 2026-07-10 2245') == 'Level 1 Term B'
+    assert parsers._waitlist_title('The Stockbridge Swingout Wait List 2026-07-10 2243') == 'The Stockbridge Swingout'
+
+
+def test_waitlist_parse_records_named_rows_collapsing_duplicates(db):
+    """Every applicant becomes a named waitlist row; a duplicated dancer collapses to one; both statuses count."""
+    event_id = db.upsert_event('Level 1 Term B (Mar-Apr 2023)', EventType.COURSE)
+    parsers.WaitlistParser().parse(
+        _waitlist_applicants_ws(), db, term='Level 1 Term B Wait List 2026-07-10 2245', year=2023, ingest_id=None
+    )
+    rows = db.conn.execute(
+        'SELECT dancer_id, head_count FROM waitlist WHERE event_id = ? ORDER BY dancer_id', (event_id,)
+    ).fetchall()
+    # DNC-1 (twice in the sheet) collapses to one row; DNC-2 ('Suspended') is still recorded
+    assert rows == [('DNC-1', 1), ('DNC-2', 1)]
+    assert db.conn.execute('SELECT COUNT(*) FROM waitlist WHERE dancer_id IS NULL').fetchone() == (0,)  # no anon rows
+
+
+def test_waitlist_parse_raises_when_file_is_unmapped(db):
+    """An unmapped (title, year) fails loudly rather than silently dropping the waitlist."""
+    with pytest.raises(ValueError, match='No event mapping'):
+        parsers.WaitlistParser().parse(
+            _waitlist_applicants_ws(), db, term='Some New Class Wait List 2026-07-10 2200', year=2099, ingest_id=None
+        )
+
+
+def test_waitlist_parse_raises_when_mapped_event_is_absent(db):
+    """A mapped name that is not in the DB (event never ingested / name drifted) fails loudly."""
+    with pytest.raises(ValueError, match='not in the database'):
+        parsers.WaitlistParser().parse(
+            _waitlist_applicants_ws(), db, term='Level 1 Term B Wait List 2026-07-10 2245', year=2023, ingest_id=None
+        )

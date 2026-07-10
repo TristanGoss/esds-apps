@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 
 from esds_apps import config
 from esds_apps.main import (
+    _attendance_activity_rows,
     app,
     card_scanning_log,
     create_and_or_return_wallet_pass_link,
@@ -392,6 +393,28 @@ def test_attendance_activity_records_db_missing(auth_client, monkeypatch):
 
 def test_attendance_activity_records_requires_auth(client):
     assert client.get('/attendance/activity/7/records.json').status_code == HTTPStatus.UNAUTHORIZED
+
+
+def test_attendance_activity_rows_include_event_waitlist(tmp_path, monkeypatch):
+    """Each scatter row carries its parent event's waitlist count (0 where there is none)."""
+    from esds_apps.attendance.attendance_db import ActivityType, AttendanceStatus, EventType, open_db
+
+    path = tmp_path / 'attendance.sqlite'
+    db = open_db(path, enforce_foreign_keys=False)
+    course = db.upsert_event('L1 Block', EventType.COURSE)
+    lesson = db.upsert_activity(course, 'wk1', '2026-01-13', ActivityType.LESSON, 'Level 1')
+    db.record_attendance(lesson, 'DNC-1', AttendanceStatus.ATTENDED)
+    db.record_waitlist(course, 'DNC-8')  # two people waitlisted for the course
+    db.record_waitlist(course, 'DNC-9')
+    social = db.upsert_event('Solo Social', EventType.SOCIAL)  # a second event, no waitlist
+    party = db.upsert_activity(social, 'party', '2026-02-01', ActivityType.SOCIAL, None)
+    db.record_attendance(party, 'DNC-1', AttendanceStatus.ATTENDED)
+    db.close()
+    monkeypatch.setattr(config, 'ATTENDANCE_DB_PATH', path)
+
+    rows = {r['activity_name']: r for r in _attendance_activity_rows()}
+    assert rows['wk1']['waitlisted'] == 2  # the course's waitlisters attach to its lesson
+    assert rows['party']['waitlisted'] == 0  # COALESCE to 0, not null, where there is no waitlist
 
 
 def test_attendance_community_dancers_json(auth_client, monkeypatch):

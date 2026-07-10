@@ -500,3 +500,36 @@ def _checked_in_with_concession_ws(title='Attendees By Activity'):
     for i, (did, conc) in enumerate([('DNC-1', 'Yes'), ('DNC-2', 'No')], start=2):
         rollup[f'A{i}'], rollup[f'B{i}'], rollup[f'C{i}'], rollup[f'D{i}'] = did, 'End of term party', conc, 'Confirmed'
     return by_act
+
+
+def _waitlist_wb():
+    """A dancecloud waitlist export: an 'Applicants' tab (parsed) and a 'Ticket Requests' tab (skipped).
+
+    'Applicants' holds one row per waitlisted dancer — dancer_id, Status, Joined, Fails. DNC-2 is
+    'Suspended' (a lapsed-offer housekeeping state that still counts as wanting a place); DNC-1
+    appears twice (an un-deduped duplicate that must collapse to a single waitlist row). The
+    sibling 'Ticket Requests' restates the same dancers one row per requested ticket type — no new
+    dancers — so the dispatcher skips it. Both tabs mimic the 'Level 1 Term B' (2023) file, which
+    _WAITLIST_EVENTS maps to the 'Level 1 Term B (Mar-Apr 2023)' event.
+    """
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+    app = wb.create_sheet('Applicants')
+    app.append(['#', 'Joined', 'dancer_id', 'redacted', 'redacted', 'Status', 'Fails'])
+    app.append(['1', '2023-03-09 15:25:21', 'DNC-1', 'redacted', 'redacted', 'Waiting', '0'])
+    app.append(['2', '2023-03-10 10:00:00', 'DNC-2', 'redacted', 'redacted', 'Suspended', '2'])
+    app.append(['3', '2023-03-11 12:00:00', 'DNC-1', 'redacted', 'redacted', 'Waiting', '0'])  # duplicate
+    tr = wb.create_sheet('Ticket Requests')
+    tr.append(['#', 'Joined', 'Status', 'dancer_id', 'redacted', 'redacted', 'Ticket Type', 'Leads', 'Follows'])
+    tr.append(['1', '2023-03-09 15:25:21', 'Waiting', 'DNC-1', 'redacted', 'redacted', 'Level 1 Term B', '0', '1'])
+    return wb
+
+
+def _waitlist_applicants_ws():
+    """Just the 'Applicants' tab of :func:`_waitlist_wb`, for the parser unit tests."""
+    return _waitlist_wb()['Applicants']
+
+
+def _waitlist_ticket_requests_ws():
+    """Just the 'Ticket Requests' tab of :func:`_waitlist_wb`, to assert it is not claimed."""
+    return _waitlist_wb()['Ticket Requests']

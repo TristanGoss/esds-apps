@@ -4,6 +4,7 @@ from pathlib import Path
 import openpyxl
 
 from esds_apps.attendance import ingest
+from esds_apps.attendance.attendance_db import EventType
 
 from .workbooks import (
     _booking_by_activity_ws,
@@ -11,6 +12,7 @@ from .workbooks import (
     _checked_in_by_activity_ws,
     _roster_ws,
     _swingout_ws,
+    _waitlist_wb,
 )
 
 # ---- workbook-context helpers ----
@@ -186,6 +188,20 @@ def test_ingest_folder_flags_lone_attendees_rollup(tmp_path, db):
     report = ingest.ingest_folder(root, db)
     assert ('ESDS Level 2 classes Feb March_pseudonymised.xlsx', 'Attendees') in report.unhandled
     assert report.redundant == []
+
+
+def test_ingest_folder_routes_waitlist_and_skips_ticket_requests(tmp_path, db):
+    """The waitlist 'Applicants' tab is claimed; its 'Ticket Requests' sibling is skipped silently."""
+    db.upsert_event('Level 1 Term B (Mar-Apr 2023)', EventType.COURSE)  # the event the waitlist attaches to
+    root = tmp_path / 'outputs'
+    root.mkdir()
+    _waitlist_wb().save(root / 'Level 1 Term B Wait List 2026-07-10 2245_pseudonymised.xlsx')
+
+    report = ingest.ingest_folder(root, db)
+    assert ('Level 1 Term B Wait List 2026-07-10 2245_pseudonymised.xlsx', 'Applicants', 'waitlist') in report.handled
+    assert all(sheet != 'Ticket Requests' for _, sheet in report.unhandled)  # redundant sibling, not flagged
+    # both applicants recorded (the duplicate DNC-1 row collapsed to one)
+    assert db.conn.execute('SELECT COUNT(*) FROM waitlist').fetchone() == (2,)
 
 
 # ---- single-file dispatch ----

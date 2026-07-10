@@ -1,6 +1,6 @@
 // Renders the all-activities attendance scatter with Plotly, mirroring the visual language of
 // the matplotlib chart in working/attendance.ipynb: colour = event type, marker shape =
-// difficulty, filled = attended / hollow = registered. Data comes from /attendance/activities.json.
+// difficulty, filled = attended / hollow = registered + waitlist. Data comes from /attendance/activities.json.
 
 // colour -> event type
 const EVENT_COLOURS = {
@@ -36,12 +36,13 @@ function difficultyOf(row) {
 // Per-point colour and symbol arrays carry the event-type / difficulty encoding within each trace.
 function dataTraces(rows) {
   const attended = rows.filter((r) => r.total > 0);
-  const registered = rows.filter((r) => r.named_registered > 0);
+  // hollow = registered + waitlist: named on the sheet (turned up or not) plus the event's waitlist.
+  const registered = rows.filter((r) => r.named_registered + r.waitlisted > 0);
 
   const customdata = (r) => [
     r.event_name, r.activity_name, r.event_type, difficultyOf(r),
     r.named_total, r.aggregate_total, r.total, r.named_registered, r.named_unknown,
-    r.activity_id,
+    r.activity_id, r.waitlisted,
   ];
 
   const attendedTrace = {
@@ -65,12 +66,12 @@ function dataTraces(rows) {
   };
 
   const registeredTrace = {
-    name: 'registered',
+    name: 'registered + waitlist',
     type: 'scatter',
     mode: 'markers',
     showlegend: false,
     x: registered.map((r) => r.date),
-    y: registered.map((r) => r.named_registered),
+    y: registered.map((r) => r.named_registered + r.waitlisted),
     customdata: registered.map(customdata),
     marker: {
       size: 9,
@@ -81,7 +82,8 @@ function dataTraces(rows) {
     },
     hovertemplate:
       '<b>%{customdata[0]}</b><br>%{customdata[1]}<br>%{x|%Y-%m-%d}<br>' +
-      'Registered: %{y}<br>Turnout unknown: %{customdata[8]}<extra></extra>',
+      'Registered + waitlist: %{y} (registered %{customdata[7]} + waitlist %{customdata[10]})<br>' +
+      'Turnout unknown: %{customdata[8]}<extra></extra>',
   };
 
   // Drawn registered-first so the filled attendance marker sits on top when the two coincide.
@@ -124,7 +126,7 @@ function legendTraces(rows) {
     marker: { size: 9, color: DANCER_GREY, symbol: 'circle' },
   }));
   traces.push(stub({
-    name: 'registered',
+    name: 'registered + waitlist',
     legendgroup: 'record',
     marker: { size: 9, color: DANCER_GREY, symbol: 'circle-open', line: { width: 1.4 } },
   }));
@@ -150,12 +152,13 @@ function showDetails(point) {
 function renderPointPanel() {
   if (!selectedActivity) return;
   const { cd, x } = selectedActivity;
-  const [eventName, activityName, eventType, difficulty, named, agg, total, registered, unknown, activityId] = cd;
+  const [eventName, activityName, eventType, difficulty, named, agg, total, registered, unknown, activityId, waitlisted] = cd;
   const summary = `
     <p><strong>${eventName}</strong> — ${activityName} (${eventType}, ${difficulty})<br>${x}</p>
     <p>
       Attended: <strong>${total}</strong> (${named} named + ${agg} anonymous door)<br>
       Registered (named): <strong>${registered}</strong><br>
+      Waitlisted (event): <strong>${waitlisted}</strong><br>
       Turnout unknown: <strong>${unknown}</strong>
     </p>`;
 

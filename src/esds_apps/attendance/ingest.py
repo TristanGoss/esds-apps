@@ -96,8 +96,10 @@ def _week_anchor(wb) -> datetime | None:
 
 # Sheet titles (lower-cased) that never hold attendance: substrings to skip outright.
 # 'member'/'mail' are membership and mailing-list dumps; 'exceptions'/'loyalty'/'tickets'
-# are bookkeeping tabs that carry no per-session attendance.
-_NON_ATTENDANCE_SHEETS = ('readme', 'member', 'mail', 'exceptions', 'loyalty', 'tickets')
+# are bookkeeping tabs that carry no per-session attendance. 'ticket requests' is a waitlist
+# export's per-request restatement of its 'Applicants' tab (the tab the waitlist parser reads),
+# so it holds no new dancers and is skipped.
+_NON_ATTENDANCE_SHEETS = ('readme', 'member', 'mail', 'exceptions', 'loyalty', 'tickets', 'ticket requests')
 
 # Whole workbooks that are membership purchases / dumps, not class or social attendance. Their
 # booking sheets ('Attendees By Activity') look just like a class booking export, so they must be

@@ -78,8 +78,10 @@ def _attendance_activity_rows() -> list[dict]:
     """Read the per-activity attendance summary from the offline attendance database.
 
     One row per activity: its date, the event and activity it belongs to, and the headcounts
-    the /attendance scatter plots. Read-only — only SELECTs run here — so it never disturbs the
-    database the notebook rebuilds. Raises FileNotFoundError if that database hasn't been built.
+    the /attendance scatter plots — including ``waitlisted``, the count of people who wanted a
+    place at the parent event but it was full (a per-event figure, so it repeats across the
+    event's activities). Read-only — only SELECTs run here — so it never disturbs the database
+    the notebook rebuilds. Raises FileNotFoundError if that database hasn't been built.
     """
     if not Path(config.ATTENDANCE_DB_PATH).exists():
         raise FileNotFoundError(config.ATTENDANCE_DB_PATH)
@@ -100,10 +102,13 @@ def _attendance_activity_rows() -> list[dict]:
                    av.aggregate_total,
                    av.total,
                    av.named_unknown,
-                   av.named_registered
+                   av.named_registered,
+                   COALESCE(wl.n, 0) AS waitlisted
             FROM activity_attendance av
             JOIN event e    ON e.event_id      = av.event_id
             JOIN activity act ON act.activity_id = av.activity_id
+            LEFT JOIN (SELECT event_id, COUNT(*) AS n FROM waitlist GROUP BY event_id) wl
+                   ON wl.event_id = av.event_id
             ORDER BY av.date
             """
         ).fetchall()

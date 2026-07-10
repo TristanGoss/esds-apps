@@ -120,6 +120,16 @@ class AttendanceDb:
         self.conn.commit()
         return event_id
 
+    def event_id_by_name(self, name: str) -> int | None:
+        """The id of an existing event by its exact name, or None. Read-only; never inserts.
+
+        Used by the waitlist parser to attach waitlisters to an event the attendance ingest
+        already created, without minting a new one — so an unmatched name surfaces as None
+        (the caller raises) rather than silently spawning an empty event.
+        """
+        row = self.conn.execute('SELECT event_id FROM event WHERE name = ?', (name,)).fetchone()
+        return row[0] if row else None
+
     def set_event_teachers(self, event_id: int, dancer_ids: list[str]) -> None:
         """Replace the teacher set for an event (idempotent). Each teacher must already be a dancer."""
         self.conn.execute('DELETE FROM event_teacher WHERE event_id = ?', (event_id,))

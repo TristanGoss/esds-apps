@@ -1,7 +1,7 @@
 // Renders the three per-term summary charts on /attendance with Plotly, from the datasets
 // served by /attendance/summaries.json (built server-side in attendance/analysis.py, itself a
 // port of the matplotlib charts in working/attendance.ipynb). Three charts:
-//   1. beginner (Level 1) intake per term, one line per academic year (solid attended / dashed registered);
+//   1. beginner (Level 1) intake per term, one line per academic year (solid attended / dashed registered + waitlist);
 //   2. Level 2 class attendance per term with the paired social-only turnout (solid / dashed);
 //   3. cohort-retention heatmap with a teaching-team strip down the joining-cohort axis;
 //   4. the 2026 community survival curve (with / without the 30th anniversary);
@@ -74,7 +74,7 @@ function termAxis(years, pointsKeys) {
 }
 
 function renderBeginnerIntake(years) {
-  const traces = yearLineTraces(years, 'points', 'points', 'attended', 'registered');
+  const traces = yearLineTraces(years, 'points', 'points', 'attended', 'registered + waitlist');
   const layout = {
     title: 'Mean Level 1 attendance per lesson, by academic year',
     xaxis: termAxis(years, ['points']),

@@ -88,6 +88,13 @@ def test_upsert_event_does_not_clobber_venue_with_none(db):
     assert db.conn.execute('SELECT venue FROM event WHERE event_id=?', (eid,)).fetchone()[0] == 'Hall'
 
 
+def test_event_id_by_name_finds_existing_and_none_for_missing(db):
+    eid = db.upsert_event('Level 1 Term B (Mar-Apr 2023)', EventType.COURSE)
+    assert db.event_id_by_name('Level 1 Term B (Mar-Apr 2023)') == eid
+    assert db.event_id_by_name('No Such Event') is None  # read-only: a miss returns None, inserts nothing
+    assert db.conn.execute('SELECT COUNT(*) FROM event').fetchone() == (1,)
+
+
 def test_set_event_teachers_replaces(db):
     eid = db.upsert_event('E', EventType.COURSE)
     db.set_event_teachers(eid, ['DNC-AAAA1111', 'DNC-BBBB2222'])
