@@ -89,6 +89,17 @@ def test_open_db_reuses_salt_across_opens(tmp_db):
     assert mac1 == mac2
 
 
+def test_open_db_enforces_foreign_keys(tmp_db):
+    """The store connection must turn foreign keys ON (SQLite defaults them OFF per-connection).
+
+    Otherwise a delete of a still-referenced dancer silently orphans its attendance rows instead
+    of failing loudly.
+    """
+    c = pseudonyms_db.open_db(tmp_db, PASSPHRASE)
+    assert c.conn.execute('PRAGMA foreign_keys').fetchone()[0] == 1
+    c.conn.close()
+
+
 def test_open_db_wrong_passphrase_raises(tmp_db):
     c = pseudonyms_db.open_db(tmp_db, PASSPHRASE)
     c.conn.close()
@@ -487,6 +498,62 @@ def test_substitute_raises_for_missing_id(ctx):
     id1 = pseudonyms_db.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
     with pytest.raises(ValueError):
         pseudonyms_db.substitute_dancer_id(ctx, id1, 'DNC-NOTEXIST')
+
+
+# ============================================================================
+# Direct dancer edits
+# ============================================================================
+
+
+def test_update_dancer_overwrites_name(ctx):
+    did = pseudonyms_db.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+    )
+    pseudonyms_db.update_dancer(
+        ctx, did, {'first_name': 'Alicia', 'last_name': 'Smyth'}, {'email': 'alice@example.com'}
+    )
+    result = pseudonyms_db.decrypt_dancer(ctx, did)
+    assert result['name'] == {'first_name': 'Alicia', 'last_name': 'Smyth'}
+
+
+def test_update_dancer_can_clear_alt(ctx):
+    """A stored alt can be removed by an edit — get_or_create can only add, not clear."""
+    did = pseudonyms_db.get_or_create_dancer_id(
+        ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+    )
+    pseudonyms_db.get_or_create_dancer_id(
+        ctx, {'first_name': 'Wrong', 'last_name': 'Smith'}, {'email': 'alice@example.com'}
+    )
+    assert pseudonyms_db.decrypt_dancer(ctx, did)['name'].get('alt_first_name') == 'Wrong'
+    pseudonyms_db.update_dancer(ctx, did, {'first_name': 'Alice', 'last_name': 'Smith'}, {'email': 'alice@example.com'})
+    assert 'alt_first_name' not in pseudonyms_db.decrypt_dancer(ctx, did)['name']
+
+
+def test_update_dancer_recomputes_hash_so_future_ingest_matches(ctx):
+    """After correcting a name, pseudonymising that corrected name finds the same record."""
+    did = pseudonyms_db.get_or_create_dancer_id(ctx, {'first_name': 'Jon', 'last_name': 'Snow'}, None)
+    pseudonyms_db.update_dancer(ctx, did, {'first_name': 'John', 'last_name': 'Snow'}, None)
+    again = pseudonyms_db.get_or_create_dancer_id(ctx, {'first_name': 'John', 'last_name': 'Snow'}, None)
+    assert again == did
+
+
+def test_update_dancer_rejects_clearing_everything(ctx):
+    did = pseudonyms_db.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+    with pytest.raises(ValueError, match='at least a name or an email'):
+        pseudonyms_db.update_dancer(ctx, did, None, None)
+
+
+def test_update_dancer_rejects_collision_with_other_dancer(ctx):
+    """Editing one dancer to match another's name is a merge, and is refused."""
+    pseudonyms_db.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+    other = pseudonyms_db.get_or_create_dancer_id(ctx, {'first_name': 'Bob', 'last_name': 'Jones'}, None)
+    with pytest.raises(ValueError, match='merge, not an edit'):
+        pseudonyms_db.update_dancer(ctx, other, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+
+
+def test_update_dancer_unknown_id_raises(ctx):
+    with pytest.raises(ValueError, match='not found'):
+        pseudonyms_db.update_dancer(ctx, 'DNC-NOPE', {'first_name': 'X', 'last_name': 'Y'}, None)
 
 
 def test_substitute_rewrites_xlsx_files(tmp_path, ctx):

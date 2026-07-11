@@ -290,3 +290,92 @@ def test_view_named_registered_counts_every_named_row(db):
         (act,),
     ).fetchone()
     assert row == (1, 1, 3, 1)  # registered = attended+absent+unknown; total stays attended-only
+
+
+# ---- reassign_dancer (de-duplication merge) ----
+
+
+def _seed_two_dancers(db):
+    db.conn.execute("INSERT INTO dancer (dancer_id) VALUES ('DNC-OLD'), ('DNC-NEW')")
+
+
+def test_reassign_moves_attendance_when_no_clash(db):
+    from esds_apps.attendance.attendance_db import reassign_dancer
+
+    _seed_two_dancers(db)
+    eid = db.upsert_event('E', EventType.COURSE)
+    act = db.upsert_activity(eid, 'W1', date(2026, 1, 6))
+    db.record_attendance(act, 'DNC-OLD', status=AttendanceStatus.ATTENDED)
+    moved = reassign_dancer(db.conn, 'DNC-OLD', 'DNC-NEW')
+    db.conn.commit()
+    assert moved['attendance'] == 1
+    holders = [r[0] for r in db.conn.execute('SELECT dancer_id FROM attendance WHERE activity_id=?', (act,))]
+    assert holders == ['DNC-NEW']
+
+
+def test_reassign_collapses_attendance_keeping_more_informative_status(db):
+    """Both ids attended the same activity: one row survives, 'attended' beating 'unknown'."""
+    from esds_apps.attendance.attendance_db import reassign_dancer
+
+    _seed_two_dancers(db)
+    eid = db.upsert_event('E', EventType.COURSE)
+    act = db.upsert_activity(eid, 'W1', date(2026, 1, 6))
+    db.record_attendance(act, 'DNC-OLD', status=AttendanceStatus.ATTENDED)
+    db.record_attendance(act, 'DNC-NEW', status=AttendanceStatus.UNKNOWN)
+    reassign_dancer(db.conn, 'DNC-OLD', 'DNC-NEW')
+    db.conn.commit()
+    rows = db.conn.execute('SELECT dancer_id, status FROM attendance WHERE activity_id=?', (act,)).fetchall()
+    assert rows == [('DNC-NEW', str(AttendanceStatus.ATTENDED))]
+
+
+def test_reassign_does_not_downgrade_survivor_attended(db):
+    """A surviving 'attended' is kept even if old_id's row is only 'unknown'."""
+    from esds_apps.attendance.attendance_db import reassign_dancer
+
+    _seed_two_dancers(db)
+    eid = db.upsert_event('E', EventType.COURSE)
+    act = db.upsert_activity(eid, 'W1', date(2026, 1, 6))
+    db.record_attendance(act, 'DNC-OLD', status=AttendanceStatus.UNKNOWN)
+    db.record_attendance(act, 'DNC-NEW', status=AttendanceStatus.ATTENDED)
+    reassign_dancer(db.conn, 'DNC-OLD', 'DNC-NEW')
+    db.conn.commit()
+    rows = db.conn.execute('SELECT dancer_id, status FROM attendance WHERE activity_id=?', (act,)).fetchall()
+    assert rows == [('DNC-NEW', str(AttendanceStatus.ATTENDED))]
+
+
+def test_reassign_sums_waitlist_head_counts_on_clash(db):
+    from esds_apps.attendance.attendance_db import reassign_dancer
+
+    _seed_two_dancers(db)
+    eid = db.upsert_event('E', EventType.COURSE)
+    db.record_waitlist(eid, 'DNC-OLD', head_count=1)
+    db.record_waitlist(eid, 'DNC-NEW', head_count=1)
+    reassign_dancer(db.conn, 'DNC-OLD', 'DNC-NEW')
+    db.conn.commit()
+    rows = db.conn.execute('SELECT dancer_id, head_count FROM waitlist WHERE event_id=?', (eid,)).fetchall()
+    assert rows == [('DNC-NEW', 2)]
+
+
+def test_reassign_collapses_duplicate_event_teacher(db):
+    from esds_apps.attendance.attendance_db import reassign_dancer
+
+    _seed_two_dancers(db)
+    eid = db.upsert_event('E', EventType.COURSE)
+    db.set_event_teachers(eid, ['DNC-OLD', 'DNC-NEW'])  # both teach it; after merge only one remains
+    reassign_dancer(db.conn, 'DNC-OLD', 'DNC-NEW')
+    db.conn.commit()
+    teachers = [r[0] for r in db.conn.execute('SELECT dancer_id FROM event_teacher WHERE event_id=?', (eid,))]
+    assert teachers == ['DNC-NEW']
+
+
+def test_reassign_leaves_anonymous_waitlist_untouched(db):
+    from esds_apps.attendance.attendance_db import reassign_dancer
+
+    _seed_two_dancers(db)
+    eid = db.upsert_event('E', EventType.COURSE)
+    db.record_waitlist(eid, dancer_id=None, head_count=5)  # anonymous count
+    moved = reassign_dancer(db.conn, 'DNC-OLD', 'DNC-NEW')
+    db.conn.commit()
+    assert moved['waitlist'] == 0
+    row = db.conn.execute('SELECT dancer_id, head_count FROM waitlist WHERE event_id=?', (eid,)).fetchone()
+    assert row == (None, 5)

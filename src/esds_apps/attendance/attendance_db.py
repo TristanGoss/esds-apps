@@ -300,6 +300,72 @@ def _tt(ticket_type: TicketType | None) -> str | None:
     return str(ticket_type) if ticket_type is not None else None
 
 
+# How informative each attendance status is, for collapsing two rows of the same person on one
+# activity: a positive presence beats a positive absence beats no turnout information at all.
+_STATUS_RANK = {
+    str(AttendanceStatus.ATTENDED): 3,
+    str(AttendanceStatus.ABSENT): 2,
+    str(AttendanceStatus.UNKNOWN): 1,
+}
+
+
+def reassign_dancer(conn: sqlite3.Connection, old_id: str, new_id: str) -> dict[str, int]:
+    """Repoint every attendance / waitlist / event_teacher row from ``old_id`` onto ``new_id``.
+
+    Called when a de-duplication merge folds ``old_id`` into ``new_id`` so the already-ingested
+    facts follow the surviving dancer instead of dangling on a deleted id until the next re-ingest.
+    Where ``new_id`` already has a row for the same activity/event the two are collapsed to one,
+    rather than tripping the unique key:
+
+    * ``attendance`` (UNIQUE activity_id, dancer_id) — the surviving row keeps the more informative
+      status (attended > absent > unknown); an existing 'attended' is never downgraded.
+    * ``waitlist`` (UNIQUE event_id, dancer_id) — the two head-counts are summed onto the survivor.
+      Anonymous (``dancer_id IS NULL``) waitlist rows never match and are left untouched.
+    * ``event_teacher`` (PK event_id, dancer_id) — once repointed the pair is identical, so the
+      duplicate is dropped.
+
+    Does not touch the ``dancer`` table and does not commit: the caller commits once so the whole
+    merge (facts + identity) lands atomically. Returns ``{table: rows_moved}`` for reporting.
+    """
+    moved: dict[str, int] = {}
+
+    # attendance: resolve same-activity clashes (upgrade the survivor's status if old's beats it,
+    # then drop old's row), then repoint whatever remains.
+    for old_aid, old_status, new_aid, new_status in conn.execute(
+        'SELECT o.attendance_id, o.status, n.attendance_id, n.status FROM attendance o '
+        'JOIN attendance n ON o.activity_id = n.activity_id WHERE o.dancer_id = ? AND n.dancer_id = ?',
+        (old_id, new_id),
+    ).fetchall():
+        if _STATUS_RANK.get(old_status, 0) > _STATUS_RANK.get(new_status, 0):
+            conn.execute('UPDATE attendance SET status = ? WHERE attendance_id = ?', (old_status, new_aid))
+        conn.execute('DELETE FROM attendance WHERE attendance_id = ?', (old_aid,))
+    moved['attendance'] = conn.execute(
+        'UPDATE attendance SET dancer_id = ? WHERE dancer_id = ?', (new_id, old_id)
+    ).rowcount
+
+    # waitlist: sum head-counts onto the survivor's row for a shared event, then repoint the rest.
+    for old_wid, old_hc, new_wid in conn.execute(
+        'SELECT o.waitlist_id, o.head_count, n.waitlist_id FROM waitlist o '
+        'JOIN waitlist n ON o.event_id = n.event_id WHERE o.dancer_id = ? AND n.dancer_id = ?',
+        (old_id, new_id),
+    ).fetchall():
+        conn.execute('UPDATE waitlist SET head_count = head_count + ? WHERE waitlist_id = ?', (old_hc, new_wid))
+        conn.execute('DELETE FROM waitlist WHERE waitlist_id = ?', (old_wid,))
+    moved['waitlist'] = conn.execute('UPDATE waitlist SET dancer_id = ? WHERE dancer_id = ?', (new_id, old_id)).rowcount
+
+    # event_teacher: drop old's row for any event new already teaches, then repoint the rest.
+    conn.execute(
+        'DELETE FROM event_teacher WHERE dancer_id = ? '
+        'AND event_id IN (SELECT event_id FROM event_teacher WHERE dancer_id = ?)',
+        (old_id, new_id),
+    )
+    moved['event_teacher'] = conn.execute(
+        'UPDATE event_teacher SET dancer_id = ? WHERE dancer_id = ?', (new_id, old_id)
+    ).rowcount
+
+    return moved
+
+
 def open_db(db_path: Path | str, enforce_foreign_keys: bool = True) -> AttendanceDb:
     """Open (or create) the attendance database. Idempotent; safe to call repeatedly.
 

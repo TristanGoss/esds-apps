@@ -69,6 +69,11 @@ class DbContext:
 
 def _setup_db(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path)
+    # Enforce foreign keys on this connection (SQLite defaults them OFF, per-connection). This is
+    # the connection the dedup merge deletes dancers on: with the facts repointed first (see
+    # attendance_db.reassign_dancer) the delete is clean, and any future path that tries to remove a
+    # still-referenced dancer now fails loudly instead of silently orphaning attendance rows.
+    conn.execute('PRAGMA foreign_keys = ON')
     conn.execute('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT)')
     conn.execute(
         'CREATE TABLE IF NOT EXISTS dancer ('
@@ -325,6 +330,71 @@ def _merge_updates(fernet: Fernet, old_row: tuple, new_row: tuple, conflicts: di
             if enc is not None:
                 updates[enc_col] = enc
     return updates
+
+
+_NAME_FIELDS = ('first_name', 'last_name', 'alt_first_name', 'alt_last_name')
+_EMAIL_FIELDS = ('email', 'alt_email')
+
+
+def _clean_fields(fields: dict[str, str] | None, allowed: tuple[str, ...]) -> dict[str, str] | None:
+    """Keep only recognised keys with non-blank values, stripped; None if nothing survives."""
+    if not fields:
+        return None
+    out = {k: fields[k].strip() for k in allowed if fields.get(k) and fields[k].strip()}
+    return out or None
+
+
+def update_dancer(
+    ctx: DbContext,
+    dancer_id: str,
+    name_fields: dict[str, str] | None,
+    email_fields: dict[str, str] | None,
+) -> dict:
+    """Overwrite one dancer's stored name/email fields in place and recompute the keyed hashes.
+
+    Raises ValueError if the id is unknown, if the edit would leave the dancer with neither a
+    name nor an email, or if the corrected name/email already belongs to a *different* dancer
+    (that is a merge, not an edit — use ``substitute_dancer_id`` via the de-duplication flow).
+    """
+    if ctx.conn.execute('SELECT 1 FROM dancer WHERE dancer_id=?', (dancer_id,)).fetchone() is None:
+        raise ValueError(f'{dancer_id!r} not found in database')
+
+    name_fields = _clean_fields(name_fields, _NAME_FIELDS)
+    email_fields = _clean_fields(email_fields, _EMAIL_FIELDS)
+
+    name_key = (
+        ' '.join(name_fields[k] for k in _CANONICAL_NAME_ORDER if k in name_fields) if name_fields else ''
+    ) or None
+    email_key = email_fields.get('email') if email_fields else None
+    if not name_key and not email_key:
+        raise ValueError('A dancer must keep at least a name or an email; this edit would clear both.')
+
+    name_hash = _value_hash(name_key, ctx.mac_key) if name_key else None
+    email_hash = _value_hash(email_key, ctx.mac_key) if email_key else None
+    for label, col, value in (('name', 'name_hash', name_hash), ('email', 'email_hash', email_hash)):
+        if value is None:
+            continue
+        clash = ctx.conn.execute(
+            f'SELECT dancer_id FROM dancer WHERE {col}=? AND dancer_id!=?', (value, dancer_id)
+        ).fetchone()
+        if clash:
+            raise ValueError(
+                f'That {label} already belongs to {clash[0]}; that is a merge, not an edit — '
+                'combine them from the de-duplication review instead.'
+            )
+
+    ctx.conn.execute(
+        'UPDATE dancer SET enc_name=?, enc_email=?, name_hash=?, email_hash=? WHERE dancer_id=?',
+        (
+            _encrypt(ctx.fernet, name_fields) if name_fields else None,
+            _encrypt(ctx.fernet, email_fields) if email_fields else None,
+            name_hash,
+            email_hash,
+            dancer_id,
+        ),
+    )
+    ctx.conn.commit()
+    return decrypt_dancer(ctx, dancer_id)
 
 
 def substitute_dancer_id(  # noqa: PLR0913
