@@ -341,6 +341,19 @@ def test_download_qr_code_scans_csv(auth_client, monkeypatch):
     assert '2024-01-01' in response.text
 
 
+def test_attendance_activities_includes_early_term_means(auth_client, monkeypatch):
+    monkeypatch.setattr('esds_apps.main._attendance_activity_rows', lambda: [{'activity_id': 1}])
+    monkeypatch.setattr(
+        'esds_apps.main.analysis.early_term_mean_lines',
+        lambda: [{'level': 'L1', 'start': '2022-09-01', 'end': '2022-10-31', 'mean': 33.43}],
+    )
+    response = auth_client.get('/attendance/activities.json')
+    assert response.status_code == HTTPStatus.OK
+    body = response.json()
+    assert body['activities'] == [{'activity_id': 1}]
+    assert body['early_term_means'][0]['level'] == 'L1'
+
+
 def test_attendance_summaries_ok(auth_client, monkeypatch):
     payload = {'beginner_intake': [{'label': '24/25', 'points': []}], 'level2_socials': [], 'cohort_retention': {}}
     monkeypatch.setattr('esds_apps.main.analysis.summaries', lambda: payload)

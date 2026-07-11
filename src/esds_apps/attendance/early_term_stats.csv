@@ -1,0 +1,21 @@
+acad_year,term_num,period,level,mean_attendance,pct_concession_member,source
+2017,3,Jan-Feb 2018,L1,78.17,0.5888,old_summary
+2017,4,Mar-Apr 2018,L1,49.67,0.607,old_summary
+2017,5,May-Jun 2018,L1,53.83,0.5314,old_summary
+2017,6,Jun-Jul 2018,L1,54.17,0.7376,old_summary
+2018,1,Sept-Oct 2018,L1,61.6,0.5319,old_summary
+2018,2,Nov-Dec 2018,L1,61.86,0.491,old_summary
+2018,3,Jan-Feb 2019,L1,69.86,0.5756,old_summary
+2018,4,Feb-Mar 2019,L1,52.0,0.5711,old_summary
+2021,5,May-Jun 2022,L1,24.83,,old_summary
+2021,6,Jun-Jul 2022,L1,29.5,,old_summary
+2022,1,Sept-Oct 2022,L1,33.43,,agm_2023
+2022,2,Nov-Dec 2022,L1,38.71,,agm_2023
+2022,3,Jan-Feb 2023,L1,41.33,,agm_2023
+2022,4,Mar-Apr 2023,L1,38.14,,agm_2023
+2021,5,May-Jun 2022,L2,11.16,,old_summary
+2021,6,Jun-Jul 2022,L2,6.67,,old_summary
+2022,1,Sept-Oct 2022,L2,14.14,,agm_2023
+2022,2,Nov-Dec 2022,L2,4.71,,agm_2023
+2022,3,Jan-Feb 2023,L2,16.57,,agm_2023
+2022,4,Mar-Apr 2023,L2,8.0,,agm_2023

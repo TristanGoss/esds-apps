@@ -171,7 +171,9 @@ async def attendance_activities(request: Request, _: None = Depends(require_vali
     fetch gets a clean 401 rather than a 302 into Google's OAuth flow.
     """
     try:
-        return JSONResponse({'activities': _attendance_activity_rows()})
+        return JSONResponse(
+            {'activities': _attendance_activity_rows(), 'early_term_means': analysis.early_term_mean_lines()}
+        )
     except FileNotFoundError:
         log.warning('Attendance database not found at %s', config.ATTENDANCE_DB_PATH)
         return JSONResponse(

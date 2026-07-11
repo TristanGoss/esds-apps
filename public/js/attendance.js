@@ -90,6 +90,31 @@ function dataTraces(rows) {
   return [registeredTrace, attendedTrace];
 }
 
+// Pre-database term means (from the old ESDS summaries / 2023 AGM report) as black reference lines:
+// a horizontal segment at each 2020-on term's mean attendance spanning its two teaching months,
+// solid for Level 1 and dashed for Level 2, so they read apart from the coloured per-activity
+// markers. Drawn after the markers so they sit on top, as in the notebook.
+function earlyMeanTraces(lines) {
+  if (!lines || !lines.length) return [];
+  const traces = lines.map((ln) => ({
+    type: 'scatter', mode: 'lines',
+    x: [ln.start, ln.end], y: [ln.mean, ln.mean],
+    line: { color: 'black', width: 2, dash: ln.level === 'L2' ? 'dash' : 'solid' },
+    showlegend: false, hoverinfo: 'skip',
+  }));
+  // Legend keys, presented like the marker/fill keys rather than as a separate box.
+  traces.push({
+    type: 'scatter', mode: 'lines', name: 'Level 1', x: [null], y: [null],
+    legendgroup: 'oldmean', legendgrouptitle: { text: 'Term mean (old records)' },
+    line: { color: 'black', width: 2 }, hoverinfo: 'skip',
+  });
+  traces.push({
+    type: 'scatter', mode: 'lines', name: 'Level 2', x: [null], y: [null],
+    legendgroup: 'oldmean', line: { color: 'black', width: 2, dash: 'dash' }, hoverinfo: 'skip',
+  });
+  return traces;
+}
+
 // Plotly has no separate colour/shape legend, so these zero-data traces stand in as legend keys,
 // grouped under titles the way the three matplotlib legends were.
 function legendTraces(rows) {
@@ -235,7 +260,7 @@ async function render() {
   const chart = document.getElementById('attendance-chart');
   await Plotly.newPlot(
     chart,
-    [...dataTraces(rows), ...legendTraces(rows)],
+    [...dataTraces(rows), ...earlyMeanTraces(payload.early_term_means), ...legendTraces(rows)],
     layout,
     { responsive: true, scrollZoom: true, displaylogo: false }
   );

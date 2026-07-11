@@ -16,6 +16,8 @@ notebook ones. Everything here is read-only — only SELECTs run — so it never
 database the notebook rebuilds.
 """
 
+import calendar
+import datetime
 import sqlite3
 from pathlib import Path
 
@@ -23,6 +25,28 @@ import numpy as np
 import pandas as pd
 
 from esds_apps import config
+
+# Pre-database term means (from the old ESDS analysis summaries and the 2023 AGM report), kept as a
+# committed CSV because they don't fit the per-dancer schema. They feed the pre-2023 context on the
+# per-year charts and the reference lines on the all-activities scatter, exactly as in the notebook.
+_EARLY_STATS_PATH = Path(__file__).resolve().parent / 'early_term_stats.csv'
+# Only the 2020-on term means go on the all-activities scatter; the earlier ones aren't useful there.
+_FIRST_EARLY_LINE_YEAR = 2020
+_MONTH = {
+    'jan': 1,
+    'feb': 2,
+    'mar': 3,
+    'apr': 4,
+    'may': 5,
+    'jun': 6,
+    'jul': 7,
+    'aug': 8,
+    'sep': 9,
+    'sept': 9,
+    'oct': 10,
+    'nov': 11,
+    'dec': 12,
+}
 
 # A substantial Level 1 block (>= this many weekly lessons) anchors a term; shorter L1
 # appearances (one-offs, Stockbridge) never define one.
@@ -46,6 +70,42 @@ _FIRST_L2_NAMES_DATE = '2026-01-01'
 def _acad_year_label(acad_year: int) -> str:
     """'2023' -> '23/24'."""
     return f'{str(acad_year)[2:]}/{str(acad_year + 1)[2:]}'
+
+
+def _early_stats() -> pd.DataFrame:
+    """The committed pre-database term means (mean_attendance per acad_year/term_num, by level)."""
+    return pd.read_csv(_EARLY_STATS_PATH)
+
+
+def _period_span(period: str) -> tuple[datetime.date, datetime.date]:
+    """(start, end) dates covering the two-month teaching block named in a period label ('Mar-Apr 2023')."""
+    span, yr = period.rsplit(' ', 1)
+    year = int(yr)
+    first, last = (_MONTH[x.strip().lower()] for x in span.split('-'))
+    return datetime.date(year, first, 1), datetime.date(year, last, calendar.monthrange(year, last)[1])
+
+
+def early_term_mean_lines() -> list[dict]:
+    """The pre-database term-mean reference lines for the all-activities scatter.
+
+    One entry per 2020-on early-stats row: its level ('L1'/'L2'), the ISO start/end dates of the
+    two-month teaching block it covers, and the mean attendance. The scatter draws each as a black
+    horizontal segment (solid for Level 1, dashed for Level 2), as the notebook does.
+    """
+    early = _early_stats()
+    ref = early[early['period'].str[-4:].astype(int) >= _FIRST_EARLY_LINE_YEAR]
+    lines = []
+    for _, r in ref.iterrows():
+        start, end = _period_span(r['period'])
+        lines.append(
+            {
+                'level': r['level'],
+                'start': start.isoformat(),
+                'end': end.isoformat(),
+                'mean': float(r['mean_attendance']),
+            }
+        )
+    return lines
 
 
 def _term_calendar(conn: sqlite3.Connection):
@@ -140,6 +200,24 @@ def _beginner_intake(conn: sqlite3.Connection, terms: pd.DataFrame, assign) -> l
                 ],
             }
         )
+
+    # Pre-database years (2017/18-2022/23): mean attendance only. No registration figures were
+    # recovered for them, so ``registered`` is None and the chart draws no dashed line.
+    early = _early_stats()
+    early_l1 = early[early['level'] == 'L1']
+    for ay in sorted(early_l1['acad_year'].unique()):
+        g = early_l1[early_l1['acad_year'] == ay].sort_values('term_num')
+        out.append(
+            {
+                'acad_year': int(ay),
+                'label': _acad_year_label(int(ay)),
+                'points': [
+                    {'term_num': int(tn), 'attended': float(a), 'registered': None}
+                    for tn, a in zip(g['term_num'], g['mean_attendance'])
+                ],
+            }
+        )
+    out.sort(key=lambda y: y['acad_year'])
     return out
 
 
@@ -180,6 +258,23 @@ def _level2_and_socials(conn: sqlite3.Connection, terms: pd.DataFrame, assign) -
                 'social_points': [{'term_num': int(t), 'value': float(v)} for t, v in zip(gs['term_num'], gs['mean'])],
             }
         )
+
+    # Pre-database years (2021/22-2022/23): mean Level 2 attendance only, no paired-social figures.
+    early = _early_stats()
+    early_l2 = early[early['level'] == 'L2']
+    for ay in sorted(early_l2['acad_year'].unique()):
+        g = early_l2[early_l2['acad_year'] == ay].sort_values('term_num')
+        out.append(
+            {
+                'acad_year': int(ay),
+                'label': _acad_year_label(int(ay)),
+                'class_points': [
+                    {'term_num': int(t), 'value': float(v)} for t, v in zip(g['term_num'], g['mean_attendance'])
+                ],
+                'social_points': [],
+            }
+        )
+    out.sort(key=lambda y: y['acad_year'])
     return out
 
 
@@ -523,12 +618,20 @@ def summaries() -> dict:
     conn = sqlite3.connect(config.ATTENDANCE_DB_PATH)
     try:
         terms, assign = _term_calendar(conn)
+        # The per-year charts colour each academic year from a viridis ramp mapped to the real
+        # calendar year (so the COVID gap shows and a year matches across charts). The browser needs
+        # the span, taken over every year on either chart -- the derived terms and the early stats.
+        early = _early_stats()
+        year_min = int(min(int(terms['acad_year'].min()), int(early['acad_year'].min())))
+        year_max = int(max(int(terms['acad_year'].max()), int(early['acad_year'].max())))
         return {
             'beginner_intake': _beginner_intake(conn, terms, assign),
             'level2_socials': _level2_and_socials(conn, terms, assign),
             'cohort_retention': _cohort_retention(conn, terms, assign),
             'community_2026': _community_2026(conn),
             'termly_active': _termly_active_community(conn, terms, assign),
+            'year_min': year_min,
+            'year_max': year_max,
         }
     finally:
         conn.close()

@@ -120,12 +120,23 @@ def termly_db(tmp_path, monkeypatch):
 
 def test_summaries_top_level_shape(built_db):
     s = analysis.summaries()
-    assert set(s) == {'beginner_intake', 'level2_socials', 'cohort_retention', 'community_2026', 'termly_active'}
+    assert set(s) == {
+        'beginner_intake',
+        'level2_socials',
+        'cohort_retention',
+        'community_2026',
+        'termly_active',
+        'year_min',
+        'year_max',
+    }
+    # The colour-ramp span covers both the derived terms (to 2025) and the early stats (from 2017).
+    assert s['year_min'] == 2017
+    assert s['year_max'] == 2025
 
 
 def test_beginner_intake_groups_by_year(built_db):
     years = {y['label']: y for y in analysis.summaries()['beginner_intake']}
-    assert set(years) == {'24/25', '25/26'}
+    assert {'24/25', '25/26'} <= set(years)
     # Two terms ingested in 2024/25, one in 2025/26.
     assert len(years['24/25']['points']) == 2
     assert len(years['25/26']['points']) == 1
@@ -134,6 +145,39 @@ def test_beginner_intake_groups_by_year(built_db):
     assert p['term_num'] == 1
     assert p['attended'] == 5.0
     assert p['registered'] == 7.0  # 5 registered + 2 waitlisted
+
+
+def test_beginner_intake_includes_pre_database_years(built_db):
+    """The pre-database early-stats L1 years appear as mean-attendance-only series (no registered)."""
+    years = {y['label']: y for y in analysis.summaries()['beginner_intake']}
+    # Years are ordered oldest-first so the colour ramp reads chronologically.
+    labels = [y['label'] for y in analysis.summaries()['beginner_intake']]
+    assert labels == sorted(labels, key=lambda s: int('20' + s[:2]))
+    assert '17/18' in years  # earliest early-stats L1 year
+    early = years['17/18']['points'][0]
+    assert early['attended'] > 0
+    assert early['registered'] is None  # no registration figures recovered pre-database
+
+
+def test_level2_socials_includes_pre_database_years(built_db):
+    """The pre-database early-stats L2 years appear as class-only series with no paired socials."""
+    years = {y['label']: y for y in analysis.summaries()['level2_socials']}
+    assert '21/22' in years  # earliest early-stats L2 year
+    assert years['21/22']['class_points']
+    assert years['21/22']['social_points'] == []
+
+
+def test_early_term_mean_lines_are_2020_on_segments():
+    lines = analysis.early_term_mean_lines()
+    # Only 2020-on periods are kept (the 2018/2019 early rows are dropped from the scatter).
+    assert lines and all(int(ln['start'][:4]) >= 2020 for ln in lines)
+    assert {ln['level'] for ln in lines} == {'L1', 'L2'}
+    for ln in lines:
+        assert ln['start'] <= ln['end']
+        assert ln['mean'] > 0
+    # A known row: Sept-Oct 2022 L1 spans the whole two-month block.
+    sep = next(ln for ln in lines if ln['level'] == 'L1' and ln['start'] == '2022-09-01')
+    assert sep['end'] == '2022-10-31'
 
 
 def test_beginner_intake_folds_waitlist_into_registered(built_db):

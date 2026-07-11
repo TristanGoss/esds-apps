@@ -7,11 +7,44 @@
 //   4. the 2026 community survival curve (with / without the 30th anniversary);
 //   5. termly active-community counts since 2026 (active >= 1 / regulars >= 2, incl / excl the 30th).
 
-// Matplotlib's tab10, so a given academic year / team keeps the same colour as in the notebook.
+// Matplotlib's tab10, still used for the teaching-team colours on the retention heatmap.
 const TAB10 = [
   '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
   '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
 ];
+
+// Matplotlib's viridis at ten evenly spaced stops, interpolated in RGB below. The per-year charts
+// colour each academic year from this ramp (see yearColour), matching the notebook.
+const VIRIDIS = [
+  '#440154', '#482878', '#3e4a89', '#31688e', '#26828e',
+  '#1f9e89', '#35b779', '#6ece58', '#b5de2b', '#fde725',
+];
+
+function _lerpHex(a, b, t) {
+  const ai = parseInt(a.slice(1), 16);
+  const bi = parseInt(b.slice(1), 16);
+  const r = Math.round((ai >> 16) + (((bi >> 16) - (ai >> 16)) * t));
+  const g = Math.round(((ai >> 8) & 255) + ((((bi >> 8) & 255) - ((ai >> 8) & 255)) * t));
+  const bl = Math.round((ai & 255) + (((bi & 255) - (ai & 255)) * t));
+  return `rgb(${r}, ${g}, ${bl})`;
+}
+
+// Sample the viridis ramp at s in [0, 1].
+function viridis(s) {
+  const clamped = Math.max(0, Math.min(1, s));
+  const scaled = clamped * (VIRIDIS.length - 1);
+  const i = Math.min(Math.floor(scaled), VIRIDIS.length - 2);
+  return _lerpHex(VIRIDIS[i], VIRIDIS[i + 1], scaled - i);
+}
+
+// Per-academic-year colour: viridis mapped to the real calendar year, so consecutive years sit
+// close and the COVID shutdown (no 2019/20 or 2020/21) reads as a jump. Flipped so recent years are
+// the dark end and pre-COVID years the yellow end. minYear/maxYear span every year on either per-year
+// chart, so a given year gets the same colour on both.
+function yearColour(acadYear, minYear, maxYear) {
+  const frac = maxYear > minYear ? (acadYear - minYear) / (maxYear - minYear) : 0;
+  return viridis(1 - frac);
+}
 
 // Matplotlib's YlGnBu, sampled light -> dark, so 0% retention reads as a gentle pale yellow and
 // 100% as a dark blue (less aggressive at zero than plasma was).
@@ -34,20 +67,23 @@ function styleStub(name, dash) {
 }
 
 // Charts 1 and 2 share a shape: per year a solid line (primary series) and an optional dashed
-// line (secondary series) in the same colour. solidKey/dashKey name the per-point fields.
-function yearLineTraces(years, pointsKey, dashPointsKey, solidLabel, dashLabel) {
+// line (secondary series) in the same colour. solidKey/dashKey name the per-point fields; the
+// colour is the year's viridis colour, shared across both charts via minYear/maxYear.
+function yearLineTraces(years, pointsKey, dashPointsKey, solidLabel, dashLabel, minYear, maxYear) {
   const traces = [];
   years.forEach((y, i) => {
-    const colour = TAB10[i % TAB10.length];
-    const solid = y[pointsKey];
+    const colour = yearColour(y.acad_year, minYear, maxYear);
+    const solid = y[pointsKey] || [];
     traces.push({
       type: 'scatter', mode: 'lines', name: y.label, legendgroup: 'year-' + i,
       x: solid.map((p) => p.term_num), y: solid.map((p) => p.attended ?? p.value),
       line: { color: colour, width: 2 },
       hovertemplate: `${y.label} ${solidLabel}<br>term %{x}: %{y:.1f}<extra></extra>`,
     });
-    const dashed = y[dashPointsKey];
-    if (dashed && dashed.length) {
+    // Pre-database years carry no secondary figures (null registered / empty socials), so drop the
+    // null points; a year left with no dashed points gets no dashed line.
+    const dashed = (y[dashPointsKey] || []).filter((p) => (p.registered ?? p.value) != null);
+    if (dashed.length) {
       traces.push({
         type: 'scatter', mode: 'lines', name: y.label, legendgroup: 'year-' + i, showlegend: false,
         x: dashed.map((p) => p.term_num), y: dashed.map((p) => p.registered ?? p.value),
@@ -73,8 +109,8 @@ function termAxis(years, pointsKeys) {
   };
 }
 
-function renderBeginnerIntake(years) {
-  const traces = yearLineTraces(years, 'points', 'points', 'attended', 'registered + waitlist');
+function renderBeginnerIntake(years, minYear, maxYear) {
+  const traces = yearLineTraces(years, 'points', 'points', 'attended', 'registered + waitlist', minYear, maxYear);
   const layout = {
     title: 'Mean Level 1 attendance per lesson, by academic year',
     xaxis: termAxis(years, ['points']),
@@ -85,10 +121,12 @@ function renderBeginnerIntake(years) {
   Plotly.newPlot('beginner-intake-chart', traces, layout, PLOT_CONFIG);
 }
 
-function renderLevel2Socials(years) {
-  const traces = yearLineTraces(years, 'class_points', 'social_points', 'Level 2 class', 'social-only tickets');
+function renderLevel2Socials(years, minYear, maxYear) {
+  const traces = yearLineTraces(
+    years, 'class_points', 'social_points', 'Level 2 class', 'social-only tickets', minYear, maxYear
+  );
   const layout = {
-    title: 'Mean Level 2 and post-class social attendance per term, by academic year',
+    title: 'Mean Level 2 and social-only attendance per term, by academic year',
     xaxis: termAxis(years, ['class_points', 'social_points']),
     yaxis: { title: 'mean attendees per session', rangemode: 'tozero', ...GRID },
     legend: { groupclick: 'toggleitem' }, hovermode: 'closest',
@@ -393,8 +431,15 @@ async function renderSummaries() {
     return;
   }
 
-  renderBeginnerIntake(payload.beginner_intake || []);
-  renderLevel2Socials(payload.level2_socials || []);
+  // The shared colour ramp spans every year on either per-year chart. The server sends the span;
+  // fall back to the years actually present if an older payload omits it.
+  const beginner = payload.beginner_intake || [];
+  const level2 = payload.level2_socials || [];
+  const allYears = [...beginner, ...level2].map((y) => y.acad_year).filter((v) => v != null);
+  const minYear = payload.year_min ?? Math.min(...allYears);
+  const maxYear = payload.year_max ?? Math.max(...allYears);
+  renderBeginnerIntake(beginner, minYear, maxYear);
+  renderLevel2Socials(level2, minYear, maxYear);
   await renderCohortRetention(payload.cohort_retention || { terms: [], matrix: [], teams: [], teacher_enc: {} });
   renderCommunity2026(payload.community_2026 || { total_dates: 0, incl_30th: [], excl_30th: [] });
   renderTermlyActive(payload.termly_active || []);
