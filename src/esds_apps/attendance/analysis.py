@@ -31,7 +31,9 @@ from esds_apps import config
 # per-year charts and the reference lines on the all-activities scatter, exactly as in the notebook.
 _EARLY_STATS_PATH = Path(__file__).resolve().parent / 'early_term_stats.csv'
 # Only the 2020-on term means go on the all-activities scatter; the earlier ones aren't useful there.
-_FIRST_EARLY_LINE_YEAR = 2020
+_FIRST_EARLY_MARKER_YEAR = 2020
+# Early-stats level code -> the stored difficulty it corresponds to.
+_LEVEL_DIFFICULTY = {'L1': 'Level 1', 'L2': 'Level 2'}
 _MONTH = {
     'jan': 1,
     'feb': 2,
@@ -85,27 +87,64 @@ def _period_span(period: str) -> tuple[datetime.date, datetime.date]:
     return datetime.date(year, first, 1), datetime.date(year, last, calendar.monthrange(year, last)[1])
 
 
-def early_term_mean_lines() -> list[dict]:
-    """The pre-database term-mean reference lines for the all-activities scatter.
+def early_term_means() -> list[dict]:
+    """The pre-database term means for the all-activities scatter, stamped on real class nights.
 
-    One entry per 2020-on early-stats row: its level ('L1'/'L2'), the ISO start/end dates of the
-    two-month teaching block it covers, and the mean attendance. The scatter draws each as a black
-    horizontal segment (solid for Level 1, dashed for Level 2), as the notebook does.
+    Each 2020-on early-stats row is matched to its teaching term (the derived term whose start
+    falls inside the row's two-month period), and its mean attendance is placed on that term's
+    class nights -- the term's Level 1 lesson dates, which mark the nights the club actually met.
+    Both the Level 1 and Level 2 means sit on those same class nights, since Level 2 ran alongside
+    Level 1 but was not logged per-night after mid-2022. A night already carrying a real turnout
+    figure for that level is skipped, so a mean never covers a genuine one. Matching to non-
+    overlapping terms (rather than the overlapping two-month spans) keeps consecutive terms, e.g.
+    May-Jun and Jun-Jul 2022, from sharing nights.
+
+    Each entry carries the level ('L1'/'L2'), the ISO night date, and the mean; the scatter draws
+    them as ordinary course markers (filled triangle for Level 1, square for Level 2), in context
+    with the per-activity points. Returns [] if the database is absent (the caller loads the
+    activity rows first, so in practice it is present).
     """
-    early = _early_stats()
-    ref = early[early['period'].str[-4:].astype(int) >= _FIRST_EARLY_LINE_YEAR]
-    lines = []
+    ref = _early_stats()
+    ref = ref[ref['period'].str[-4:].astype(int) >= _FIRST_EARLY_MARKER_YEAR]
+    if ref.empty or not Path(config.ATTENDANCE_DB_PATH).exists():
+        return []
+
+    conn = sqlite3.connect(config.ATTENDANCE_DB_PATH)
+    try:
+        terms, assign = _term_calendar(conn)
+        acts = pd.read_sql_query(
+            "SELECT date, difficulty, total FROM activity_attendance WHERE difficulty IN ('Level 1', 'Level 2')",
+            conn,
+            parse_dates=['date'],
+        )
+    finally:
+        conn.close()
+
+    term_start = dict(zip(terms['term_idx'], terms['term_start']))
+    # Class nights of each teaching term = its Level 1 lesson dates.
+    l1 = acts.loc[acts['difficulty'] == 'Level 1', ['date']].copy()
+    l1['term_idx'] = assign(l1['date'])
+    nights_by_term = {
+        int(t): sorted(g['date'].dt.date.unique()) for t, g in l1.dropna(subset=['term_idx']).groupby('term_idx')
+    }
+    # Nights that already carry a real turnout figure for a level -- don't stamp a mean on top.
+    measured = set(zip(acts.loc[acts['total'] > 0, 'difficulty'], acts.loc[acts['total'] > 0, 'date'].dt.date))
+
+    means = []
     for _, r in ref.iterrows():
         start, end = _period_span(r['period'])
-        lines.append(
-            {
-                'level': r['level'],
-                'start': start.isoformat(),
-                'end': end.isoformat(),
-                'mean': float(r['mean_attendance']),
-            }
-        )
-    return lines
+        tidx = assign(pd.Series([pd.Timestamp(start + (end - start) / 2)])).iloc[0]
+        if pd.isna(tidx):
+            continue
+        tidx = int(tidx)
+        ts = term_start.get(tidx)
+        if ts is None or not (start <= ts.date() <= end):  # the matched term must open inside this period
+            continue
+        difficulty = _LEVEL_DIFFICULTY[r['level']]
+        for night in nights_by_term.get(tidx, []):
+            if (difficulty, night) not in measured:
+                means.append({'level': r['level'], 'date': night.isoformat(), 'mean': float(r['mean_attendance'])})
+    return means
 
 
 def _term_calendar(conn: sqlite3.Connection):
@@ -618,20 +657,15 @@ def summaries() -> dict:
     conn = sqlite3.connect(config.ATTENDANCE_DB_PATH)
     try:
         terms, assign = _term_calendar(conn)
-        # The per-year charts colour each academic year from a viridis ramp mapped to the real
-        # calendar year (so the COVID gap shows and a year matches across charts). The browser needs
-        # the span, taken over every year on either chart -- the derived terms and the early stats.
-        early = _early_stats()
-        year_min = int(min(int(terms['acad_year'].min()), int(early['acad_year'].min())))
-        year_max = int(max(int(terms['acad_year'].max()), int(early['acad_year'].max())))
+        # The per-year charts colour each year from a turbo ramp; the browser derives the ramp
+        # positions from the academic years actually present in these datasets (see the summaries
+        # JS), so the colours re-rank themselves as more years are added.
         return {
             'beginner_intake': _beginner_intake(conn, terms, assign),
             'level2_socials': _level2_and_socials(conn, terms, assign),
             'cohort_retention': _cohort_retention(conn, terms, assign),
             'community_2026': _community_2026(conn),
             'termly_active': _termly_active_community(conn, terms, assign),
-            'year_min': year_min,
-            'year_max': year_max,
         }
     finally:
         conn.close()

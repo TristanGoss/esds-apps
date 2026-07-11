@@ -13,11 +13,12 @@ const TAB10 = [
   '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
 ];
 
-// Matplotlib's viridis at ten evenly spaced stops, interpolated in RGB below. The per-year charts
-// colour each academic year from this ramp (see yearColour), matching the notebook.
-const VIRIDIS = [
-  '#440154', '#482878', '#3e4a89', '#31688e', '#26828e',
-  '#1f9e89', '#35b779', '#6ece58', '#b5de2b', '#fde725',
+// Matplotlib's turbo at 17 evenly spaced stops, interpolated in RGB below. The per-year charts
+// colour each academic year from this ramp (see yearColour); turbo is used over viridis because it
+// stays discriminable across its whole range, so adjacent years don't blur together.
+const TURBO = [
+  '#30123b', '#4040a2', '#466be3', '#4294ff', '#28bceb', '#18ddc2', '#32f298', '#6dfe62', '#a4fc3c',
+  '#cdec34', '#eecf3a', '#fdac34', '#fb7e21', '#eb500e', '#d02f05', '#a91601', '#7a0403',
 ];
 
 function _lerpHex(a, b, t) {
@@ -29,21 +30,39 @@ function _lerpHex(a, b, t) {
   return `rgb(${r}, ${g}, ${bl})`;
 }
 
-// Sample the viridis ramp at s in [0, 1].
-function viridis(s) {
+// Sample the turbo ramp at s in [0, 1].
+function turbo(s) {
   const clamped = Math.max(0, Math.min(1, s));
-  const scaled = clamped * (VIRIDIS.length - 1);
-  const i = Math.min(Math.floor(scaled), VIRIDIS.length - 2);
-  return _lerpHex(VIRIDIS[i], VIRIDIS[i + 1], scaled - i);
+  const scaled = clamped * (TURBO.length - 1);
+  const i = Math.min(Math.floor(scaled), TURBO.length - 2);
+  return _lerpHex(TURBO[i], TURBO[i + 1], scaled - i);
 }
 
-// Per-academic-year colour: viridis mapped to the real calendar year, so consecutive years sit
-// close and the COVID shutdown (no 2019/20 or 2020/21) reads as a jump. Flipped so recent years are
-// the dark end and pre-COVID years the yellow end. minYear/maxYear span every year on either per-year
-// chart, so a given year gets the same colour on both.
-function yearColour(acadYear, minYear, maxYear) {
-  const frac = maxYear > minYear ? (acadYear - minYear) / (maxYear - minYear) : 0;
-  return viridis(1 - frac);
+// Position each academic year on [0, 1] for the colour ramp. Years are ranked densely (not placed by
+// absolute value) so adjacent years are well separated; a single empty slot is inserted across any
+// break in the run, so the COVID shutdown (no 2019/20 or 2020/21 classes) still reads as a jump.
+// Derived from whatever years are present, so the colours re-rank smoothly as more data is added.
+function yearPositions(years) {
+  const ordered = [...new Set(years)].sort((a, b) => a - b);
+  const slots = {};
+  let slot = 0;
+  let prev = null;
+  ordered.forEach((y) => {
+    if (prev !== null && y - prev > 1) slot += 1; // one empty slot for a skipped year
+    slots[y] = slot;
+    slot += 1;
+    prev = y;
+  });
+  const slotMax = Math.max(0, ...Object.values(slots));
+  const positions = {};
+  ordered.forEach((y) => (positions[y] = slotMax ? slots[y] / slotMax : 0));
+  return positions;
+}
+
+// Per-academic-year colour: turbo sampled at the year's ranked position, shared across both per-year
+// charts (positions are built once over the union of their years) so a year matches on each.
+function yearColour(acadYear, positions) {
+  return turbo(positions[acadYear] ?? 0);
 }
 
 // Matplotlib's YlGnBu, sampled light -> dark, so 0% retention reads as a gentle pale yellow and
@@ -68,11 +87,11 @@ function styleStub(name, dash) {
 
 // Charts 1 and 2 share a shape: per year a solid line (primary series) and an optional dashed
 // line (secondary series) in the same colour. solidKey/dashKey name the per-point fields; the
-// colour is the year's viridis colour, shared across both charts via minYear/maxYear.
-function yearLineTraces(years, pointsKey, dashPointsKey, solidLabel, dashLabel, minYear, maxYear) {
+// colour is the year's turbo colour, shared across both charts via the ranked-position map.
+function yearLineTraces(years, pointsKey, dashPointsKey, solidLabel, dashLabel, positions) {
   const traces = [];
   years.forEach((y, i) => {
-    const colour = yearColour(y.acad_year, minYear, maxYear);
+    const colour = yearColour(y.acad_year, positions);
     const solid = y[pointsKey] || [];
     traces.push({
       type: 'scatter', mode: 'lines', name: y.label, legendgroup: 'year-' + i,
@@ -109,8 +128,8 @@ function termAxis(years, pointsKeys) {
   };
 }
 
-function renderBeginnerIntake(years, minYear, maxYear) {
-  const traces = yearLineTraces(years, 'points', 'points', 'attended', 'registered + waitlist', minYear, maxYear);
+function renderBeginnerIntake(years, positions) {
+  const traces = yearLineTraces(years, 'points', 'points', 'attended', 'registered + waitlist', positions);
   const layout = {
     title: 'Mean Level 1 attendance per lesson, by academic year',
     xaxis: termAxis(years, ['points']),
@@ -121,9 +140,9 @@ function renderBeginnerIntake(years, minYear, maxYear) {
   Plotly.newPlot('beginner-intake-chart', traces, layout, PLOT_CONFIG);
 }
 
-function renderLevel2Socials(years, minYear, maxYear) {
+function renderLevel2Socials(years, positions) {
   const traces = yearLineTraces(
-    years, 'class_points', 'social_points', 'Level 2 class', 'social-only tickets', minYear, maxYear
+    years, 'class_points', 'social_points', 'Level 2 class', 'social-only tickets', positions
   );
   const layout = {
     title: 'Mean Level 2 and social-only attendance per term, by academic year',
@@ -431,15 +450,14 @@ async function renderSummaries() {
     return;
   }
 
-  // The shared colour ramp spans every year on either per-year chart. The server sends the span;
-  // fall back to the years actually present if an older payload omits it.
+  // Rank the colour ramp over the union of years on both per-year charts, so a given year is the
+  // same colour on each and the ranking (and hence every year's colour) updates as data is added.
   const beginner = payload.beginner_intake || [];
   const level2 = payload.level2_socials || [];
   const allYears = [...beginner, ...level2].map((y) => y.acad_year).filter((v) => v != null);
-  const minYear = payload.year_min ?? Math.min(...allYears);
-  const maxYear = payload.year_max ?? Math.max(...allYears);
-  renderBeginnerIntake(beginner, minYear, maxYear);
-  renderLevel2Socials(level2, minYear, maxYear);
+  const positions = yearPositions(allYears);
+  renderBeginnerIntake(beginner, positions);
+  renderLevel2Socials(level2, positions);
   await renderCohortRetention(payload.cohort_retention || { terms: [], matrix: [], teams: [], teacher_enc: {} });
   renderCommunity2026(payload.community_2026 || { total_dates: 0, incl_30th: [], excl_30th: [] });
   renderTermlyActive(payload.termly_active || []);

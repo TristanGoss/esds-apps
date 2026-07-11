@@ -120,18 +120,7 @@ def termly_db(tmp_path, monkeypatch):
 
 def test_summaries_top_level_shape(built_db):
     s = analysis.summaries()
-    assert set(s) == {
-        'beginner_intake',
-        'level2_socials',
-        'cohort_retention',
-        'community_2026',
-        'termly_active',
-        'year_min',
-        'year_max',
-    }
-    # The colour-ramp span covers both the derived terms (to 2025) and the early stats (from 2017).
-    assert s['year_min'] == 2017
-    assert s['year_max'] == 2025
+    assert set(s) == {'beginner_intake', 'level2_socials', 'cohort_retention', 'community_2026', 'termly_active'}
 
 
 def test_beginner_intake_groups_by_year(built_db):
@@ -167,17 +156,40 @@ def test_level2_socials_includes_pre_database_years(built_db):
     assert years['21/22']['social_points'] == []
 
 
-def test_early_term_mean_lines_are_2020_on_segments():
-    lines = analysis.early_term_mean_lines()
-    # Only 2020-on periods are kept (the 2018/2019 early rows are dropped from the scatter).
-    assert lines and all(int(ln['start'][:4]) >= 2020 for ln in lines)
-    assert {ln['level'] for ln in lines} == {'L1', 'L2'}
-    for ln in lines:
-        assert ln['start'] <= ln['end']
-        assert ln['mean'] > 0
-    # A known row: Sept-Oct 2022 L1 spans the whole two-month block.
-    sep = next(ln for ln in lines if ln['level'] == 'L1' and ln['start'] == '2022-09-01')
-    assert sep['end'] == '2022-10-31'
+def test_early_term_means_stamp_term_mean_on_class_nights(tmp_path, monkeypatch):
+    """The term mean lands on the teaching term's Level 1 class nights, skipping real-turnout nights."""
+    path = tmp_path / 'attendance.sqlite'
+    db = open_db(path, enforce_foreign_keys=False)
+    ev = db.upsert_event('L1 Autumn 2022', EventType.COURSE)
+    # A six-lesson Level 1 block anchors the Sept-Oct 2022 teaching term.
+    nights = [datetime.date(2022, 9, 15) + datetime.timedelta(days=7 * w) for w in range(6)]
+    for i, d in enumerate(nights):
+        aid = db.upsert_activity(ev, f'L1 wk{i}', d, ActivityType.LESSON, 'Level 1')
+        if i == 0:
+            db.record_attendance(aid, 'd1', AttendanceStatus.ATTENDED)  # first night has a real figure
+    db.close()
+    monkeypatch.setattr(analysis.config, 'ATTENDANCE_DB_PATH', path)
+
+    means = analysis.early_term_means()
+    all_nights = {d.isoformat() for d in nights}
+
+    # Level 1: Sept-Oct 2022 mean (33.43) on every class night except the one with a real figure.
+    l1 = {m['date']: m['mean'] for m in means if m['level'] == 'L1'}
+    assert set(l1) == all_nights - {nights[0].isoformat()}
+    assert all(v == 33.43 for v in l1.values())
+
+    # Level 2: same term mean (14.14) on all the class nights -- Level 2 ran alongside, unlogged.
+    l2 = {m['date']: m['mean'] for m in means if m['level'] == 'L2'}
+    assert set(l2) == all_nights
+    assert all(v == 14.14 for v in l2.values())
+
+    # Periods with no teaching term in this DB (e.g. May-Jun 2022) contribute nothing -- no overlap.
+    assert all(d.startswith('2022-09') or d.startswith('2022-10') for d in set(l1) | set(l2))
+
+
+def test_early_term_means_empty_without_db(tmp_path, monkeypatch):
+    monkeypatch.setattr(analysis.config, 'ATTENDANCE_DB_PATH', tmp_path / 'nope.sqlite')
+    assert analysis.early_term_means() == []
 
 
 def test_beginner_intake_folds_waitlist_into_registered(built_db):

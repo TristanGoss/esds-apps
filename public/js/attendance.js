@@ -90,29 +90,26 @@ function dataTraces(rows) {
   return [registeredTrace, attendedTrace];
 }
 
-// Pre-database term means (from the old ESDS summaries / 2023 AGM report) as black reference lines:
-// a horizontal segment at each 2020-on term's mean attendance spanning its two teaching months,
-// solid for Level 1 and dashed for Level 2, so they read apart from the coloured per-activity
-// markers. Drawn after the markers so they sit on top, as in the notebook.
-function earlyMeanTraces(lines) {
-  if (!lines || !lines.length) return [];
-  const traces = lines.map((ln) => ({
-    type: 'scatter', mode: 'lines',
-    x: [ln.start, ln.end], y: [ln.mean, ln.mean],
-    line: { color: 'black', width: 2, dash: ln.level === 'L2' ? 'dash' : 'solid' },
-    showlegend: false, hoverinfo: 'skip',
-  }));
-  // Legend keys, presented like the marker/fill keys rather than as a separate box.
-  traces.push({
-    type: 'scatter', mode: 'lines', name: 'Level 1', x: [null], y: [null],
-    legendgroup: 'oldmean', legendgrouptitle: { text: 'Term mean (old records)' },
-    line: { color: 'black', width: 2 }, hoverinfo: 'skip',
+// Pre-database term means (from the old ESDS summaries / 2023 AGM report) drawn as ordinary course
+// markers -- a filled blue triangle for Level 1, a square for Level 2 -- on each of a term's class
+// nights (the server matches each early-stats term to its teaching term and stamps the mean on that
+// term's class nights), styled like the attended points so they sit in context and need no separate
+// legend key (the existing colour / marker keys already explain them). They are per-term means, not
+// single sessions (see the FAQ), so they read oddly uniform. Drawn after the markers to sit on top.
+function earlyMeanTraces(means) {
+  if (!means || !means.length) return [];
+  const byLevel = { L1: [], L2: [] };
+  means.forEach((m) => byLevel[m.level] && byLevel[m.level].push(m));
+  const trace = (rows, difficulty, label) => ({
+    type: 'scatter', mode: 'markers', name: label, showlegend: false,
+    x: rows.map((m) => m.date), y: rows.map((m) => m.mean),
+    marker: {
+      size: 9, color: EVENT_COLOURS.course, symbol: DIFFICULTY_SYMBOLS[difficulty],
+      line: { color: 'white', width: 0.6 }, opacity: 0.85,
+    },
+    hovertemplate: `<b>Term mean (old records)</b><br>${label}<br>%{x|%Y}<br>mean attended: %{y:.1f}<extra></extra>`,
   });
-  traces.push({
-    type: 'scatter', mode: 'lines', name: 'Level 2', x: [null], y: [null],
-    legendgroup: 'oldmean', line: { color: 'black', width: 2, dash: 'dash' }, hoverinfo: 'skip',
-  });
-  return traces;
+  return [trace(byLevel.L1, 'Level 1', 'Level 1'), trace(byLevel.L2, 'Level 2', 'Level 2')];
 }
 
 // Plotly has no separate colour/shape legend, so these zero-data traces stand in as legend keys,
