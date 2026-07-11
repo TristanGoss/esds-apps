@@ -123,3 +123,86 @@ def test_search_dancer_finds_by_alt_email(ctx):
     results = dancer_matching.search_dancer(ctx, 'alice@home.com', threshold=0.9)
     assert len(results) == 1
     assert results[0][0]['dancer_id'] == did
+
+
+# ---- find_conflated_identities (one id representing two people) ----
+
+
+def _dancer_with_names(ctx, first, last, alt_first=None, alt_last=None):
+    """Create a dancer, then set alt name fields via update_dancer, and return its id."""
+    did = pseudonyms_db.get_or_create_dancer_id(ctx, {'first_name': first, 'last_name': last}, None)
+    fields = {'first_name': first, 'last_name': last}
+    if alt_first:
+        fields['alt_first_name'] = alt_first
+    if alt_last:
+        fields['alt_last_name'] = alt_last
+    pseudonyms_db.update_dancer(ctx, did, fields, None)
+    return did
+
+
+def test_conflated_flags_two_different_people(ctx):
+    did = _dancer_with_names(ctx, 'John', 'Smith', alt_first='Priya', alt_last='Okafor')
+    flagged = [f[0] for f in dancer_matching.find_conflated_identities(ctx)]
+    assert did in flagged
+
+
+def test_conflated_ignores_marriage_surname_change(ctx):
+    """Same first name, different surname (no alt first name) is not a conflation."""
+    did = _dancer_with_names(ctx, 'Alice', 'Smith', alt_last='Jones')
+    assert did not in [f[0] for f in dancer_matching.find_conflated_identities(ctx)]
+
+
+def test_conflated_ignores_similar_variants(ctx):
+    """Both names present but each a near-spelling of its primary stays below the difference bar."""
+    did = _dancer_with_names(ctx, 'Alice', 'Smith', alt_first='Alyce', alt_last='Smyth')
+    assert did not in [f[0] for f in dancer_matching.find_conflated_identities(ctx, 60, 60)]
+
+
+def test_conflated_requires_both_alts(ctx):
+    """A very different first name alone (shared surname) is out of scope for this metric."""
+    did = _dancer_with_names(ctx, 'John', 'Smith', alt_first='Priya')  # no alt surname
+    assert did not in [f[0] for f in dancer_matching.find_conflated_identities(ctx)]
+
+
+def test_conflated_sorted_most_different_first(ctx):
+    near = _dancer_with_names(ctx, 'Jon', 'Smith', alt_first='Jan', alt_last='Smyth')  # both differ, but mildly
+    far = _dancer_with_names(ctx, 'John', 'Smith', alt_first='Priya', alt_last='Okafor')  # very different
+    ids = [f[0] for f in dancer_matching.find_conflated_identities(ctx, 90, 90)]
+    assert set(ids) >= {near, far}  # both fall below the (generous) 90 bar
+    assert ids[0] == far  # lowest combined similarity comes first
+
+
+# ---- name-combination matching (finds a person hidden in another record's alt fields) ----
+
+
+def test_find_duplicate_matches_person_hidden_in_alt_fields(ctx):
+    """A record blended via a shared email (second person in its alts) matches that person's own record."""
+    blended = _dancer_with_names(ctx, 'John', 'Smith', alt_first='Priya', alt_last='Okafor')
+    true_record = pseudonyms_db.get_or_create_dancer_id(ctx, {'first_name': 'Priya', 'last_name': 'Okafor'}, None)
+    pairs = dancer_matching.find_duplicate_candidates(ctx, threshold=0.95)
+    matched = {frozenset((a['dancer_id'], b['dancer_id'])) for a, b, _ in pairs}
+    assert frozenset((blended, true_record)) in matched
+
+
+def test_find_duplicate_matches_single_alt_combination(ctx):
+    """One alt (surname only) gives two full names; the crossed combination still matches."""
+    blended = _dancer_with_names(ctx, 'John', 'Smith', alt_last='Okafor')  # -> 'john smith', 'john okafor'
+    other = pseudonyms_db.get_or_create_dancer_id(ctx, {'first_name': 'John', 'last_name': 'Okafor'}, None)
+    pairs = dancer_matching.find_duplicate_candidates(ctx, threshold=0.95)
+    matched = {frozenset((a['dancer_id'], b['dancer_id'])) for a, b, _ in pairs}
+    assert frozenset((blended, other)) in matched
+
+
+def test_full_names_combinations():
+    assert dancer_matching._full_names({'name': {'first_name': 'John', 'last_name': 'Smith'}}) == ['john smith']
+    both = dancer_matching._full_names(
+        {'name': {'first_name': 'John', 'last_name': 'Smith', 'alt_first_name': 'Priya', 'alt_last_name': 'Okafor'}}
+    )
+    assert set(both) == {'john smith', 'john okafor', 'priya smith', 'priya okafor'}
+
+
+def test_full_names_ignores_unrelated_pair_still(ctx):
+    """Two genuinely different people with no shared name combination don't match."""
+    pseudonyms_db.get_or_create_dancer_id(ctx, {'first_name': 'Alice', 'last_name': 'Smith'}, None)
+    pseudonyms_db.get_or_create_dancer_id(ctx, {'first_name': 'Bob', 'last_name': 'Jones'}, None)
+    assert dancer_matching.find_duplicate_candidates(ctx, threshold=0.9) == []
