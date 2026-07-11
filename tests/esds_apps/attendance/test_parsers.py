@@ -94,6 +94,9 @@ def test_strip_attendance_normalises_level_2_3():
         ('Level 2 & Social Only Attendanc', 'course'),  # 'level' beats 'social'
         ('Teachers Choice 12th Dec', 'course'),
         ('Sat 17th Workshop', 'workshop'),
+        ('Level 1+ workshop', 'workshop'),  # a levelled workshop is a workshop, not a course
+        ('The Peter and Lauren Thursday night takeover, Level 2 class and social', 'workshop'),
+        ('Level 1 Term B Charleston', 'course'),  # a levelled charleston course, not a workshop
         ('Begn Charleston 24th Feb', 'workshop'),
         ('Christmas Party 19th Dec', 'social'),
         ('Tea Dance 13th Oct', 'social'),
@@ -1015,3 +1018,33 @@ def test_waitlist_parse_raises_when_mapped_event_is_absent(db):
         parsers.WaitlistParser().parse(
             _waitlist_applicants_ws(), db, term='Level 1 Term B Wait List 2026-07-10 2245', year=2023, ingest_id=None
         )
+
+
+def _applicants_ws_joined(joined_iso: str, dancer_id: str = 'DNC-1'):
+    """A minimal waitlist 'Applicants' tab with one applicant whose Joined date is given."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Applicants'
+    ws.append(['#', 'Joined', 'dancer_id', 'redacted', 'Status', 'Fails'])
+    ws.append(['1', joined_iso, dancer_id, 'redacted', 'Waiting', '0'])
+    return ws
+
+
+def test_waitlist_joined_month_reads_earliest_join():
+    matrix = list(_applicants_ws_joined('2022-03-21 09:00:00').iter_rows(values_only=True))
+    assert parsers._waitlist_joined_month(matrix, 0) == 3
+
+
+def test_waitlist_month_separates_two_same_title_year_courses(db):
+    """Two 2022 'Term B' courses share title+year; the joined-month routes each waitlist correctly."""
+    mar = db.upsert_event('Level 1 Fundamentals Term B (Mar-Apr 2022)', EventType.COURSE)
+    nov = db.upsert_event('Level 1 Fundamentals Term B (Nov-Dec 2022)', EventType.COURSE)
+    term = 'Level 1 Fundamentals Term B Wait List 2026-07-11 1218'
+    parsers.WaitlistParser().parse(
+        _applicants_ws_joined('2022-03-21 09:00:00', 'DNC-1'), db, term=term, year=2022, ingest_id=None
+    )
+    parsers.WaitlistParser().parse(
+        _applicants_ws_joined('2022-11-02 09:00:00', 'DNC-2'), db, term=term, year=2022, ingest_id=None
+    )
+    assert db.conn.execute('SELECT dancer_id FROM waitlist WHERE event_id = ?', (mar,)).fetchall() == [('DNC-1',)]
+    assert db.conn.execute('SELECT dancer_id FROM waitlist WHERE event_id = ?', (nov,)).fetchall() == [('DNC-2',)]

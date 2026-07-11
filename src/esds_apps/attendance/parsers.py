@@ -292,16 +292,21 @@ def _activity_type_from_name(label: str, event_type: EventType) -> ActivityType:
 def _event_type_for(title: str) -> EventType:
     """Classify an event from keywords in its tab title.
 
-    'level' wins first: the termly "Level 2 & Social Only" tabs contain the word
-    "social" but are courses. Workshops next, then socials; anything unmatched
-    (Teachers Choice, plain Level N) is a course.
+    A one-off 'Workshop' (or a guest 'takeover' night) wins first, so a levelled workshop
+    ('Level 1+ workshop', 'Level 3 ... Workshop') reads as a workshop rather than a termly course.
+    'level' wins next: the termly "Level 2 & Social Only" tabs contain the word "social" but are
+    courses, and 'Level 1 Term B Charleston' is a levelled course, not a charleston workshop — which
+    is why a bare 'charleston' is only consulted after 'level'. Then the Stockbridge weekender, then
+    socials; anything unmatched (Teachers Choice, plain Level N) is a course.
     """
     t = title.lower()
+    if 'workshop' in t or 'takeover' in t:
+        return EventType.WORKSHOP
     if 'level' in t:
         return EventType.COURSE
     if 'swingout' in t or 'swing out' in t:
         return EventType.WEEKENDER
-    if 'workshop' in t or 'charleston' in t:
+    if 'charleston' in t:
         return EventType.WORKSHOP
     if any(k in t for k in ('social', 'party', 'tea dance')):
         return EventType.SOCIAL
@@ -1540,12 +1545,17 @@ class StockbridgeSwingoutParser(Parser):
 # matches the event name the attendance ingest settled on: a termly course is named for its
 # month window ('Levels 1-2 (Feb-Mar 2024) Level 1 (2024)'), not for the booking's 'Beginners
 # Level 1 Lindy Hop 6 week block'. There is no shared key to derive one from the other, so the
-# thirteen historical waitlists are mapped by hand, keyed on (booking title, year) — the year,
-# resolved from the applicants' Joined dates, separates the two same-named 'Term A' files (2022
-# vs 2023). The value is the exact event name; it is looked up (never created), so a name that
-# has drifted since this table was written fails loudly instead of spawning an empty event.
-_WAITLIST_EVENTS: dict[tuple[str, int], str] = {
+# historical waitlists are mapped by hand. The key is (booking title, year), with an optional
+# third element — the month of the earliest 'Joined' date — used only where (title, year) alone
+# is ambiguous: two 2022 'Level 1 Fundamentals Term B' courses (Mar-Apr and Nov-Dec) share a
+# booking title and year, so their waitlists are separated by when the applicants joined. Lookup
+# tries the 3-tuple first, then falls back to the 2-tuple. The value is the exact event name; it
+# is looked up (never created), so a name that has drifted here fails loudly, not silently.
+_WAITLIST_EVENTS: dict[tuple, str] = {
     ('30 Years of Edinburgh Swing Dance Society', 2026): '30 Years of Edinburgh Swing Dance Society (2026)',
+    ('Beginners 1920s Charleston Workshop with Charlie DecaVita', 2022): (
+        'Beginners 1920s Charleston Workshop with Charlie DecaVita (2022)'
+    ),
     ('Beginners Level 1 Lindy Hop 6 week block', 2024): 'Levels 1-2 (Feb-Mar 2024) Level 1 (2024)',
     ('Beginners Level 1- six week block of Lindy Hop classes', 2025): 'Jan-Feb 2025 Level 1 (2025)',
     ('Christmas End of Term Band Social Dance', 2022): 'Christmas End of Term Band Social Dance (2022)',
@@ -1554,12 +1564,19 @@ _WAITLIST_EVENTS: dict[tuple[str, int], str] = {
         2023,
     ): 'Christmas Party with Ian Ewing and the Chevaliers (2023)',
     ('Christmas Party with the Castle Rock Jazz Band', 2024): 'Nov-Dec 2024: Christmas Party 19th Dec',
+    ('ESDS Level 1 Fundamentals classes Feb March', 2022): 'ESDS Level 1 Fundamentals classes Feb March (2022)',
     ('Level 1 - 5 week block', 2023): 'Levels 1-3 (Oct-Nov 2023) Level 1 (2023)',
     ('Level 1 Beginners Lindy Hop', 2024): 'Levels 1-2 (Jan-Feb 2024) Level 1 (2024)',
     ('Level 1 Fundamentals Term A', 2023): 'Level 1 Fundamentals Term A (Jan-Feb 2023)',
     ('Level 1 Fundamentals Term A', 2022): 'Level 1 Fundamentals Term A (Sep-Oct 2022)',
-    ('Level 1 Fundamentals Term B', 2022): 'Level 1 Fundamentals Term B (Nov-Dec 2022)',
+    ('Level 1 Fundamentals Term A (6 weeks)', 2022): 'Level 1 Fundamentals Term A (6 weeks) (May-Jun 2022)',
+    # Two 2022 'Term B' courses share title+year; the joined-month separates their waitlists.
+    ('Level 1 Fundamentals Term B', 2022, 3): 'Level 1 Fundamentals Term B (Mar-Apr 2022)',
+    ('Level 1 Fundamentals Term B', 2022, 11): 'Level 1 Fundamentals Term B (Nov-Dec 2022)',
+    ('Level 1 Term A', 2023): 'Level 1 Term A (2023)',
     ('Level 1 Term B', 2023): 'Level 1 Term B (Mar-Apr 2023)',
+    ('Level 1+ Workshop and Social Dance', 2023): 'Level 1+ Workshop and Social Dance (2023)',
+    ('Shim Sham Workshop', 2023): 'Shim Sham Workshop (2023)',
     ('The Stockbridge Swingout', 2025): 'Sept-Oct 2025: Stockbridge Swingout',
 }
 
@@ -1567,6 +1584,24 @@ _WAITLIST_EVENTS: dict[tuple[str, int], str] = {
 def _waitlist_title(term: str) -> str:
     """The dancecloud event title from a waitlist file's term: the text before ' Wait List'."""
     return re.split(r'\s+wait\s*list\b', term, maxsplit=1, flags=re.IGNORECASE)[0].strip()
+
+
+def _waitlist_joined_month(matrix: list[tuple], header_row: int) -> int | None:
+    """The calendar month of the earliest 'Joined' date on a waitlist 'Applicants' tab, or None.
+
+    Applicants join a waitlist in the weeks before their course runs, so the earliest join places
+    the file on its course instance — the disambiguator for two same-(title, year) waitlists
+    (the Mar-Apr vs Nov-Dec 2022 'Level 1 Fundamentals Term B' courses). None if no Joined date.
+    """
+    joined_col = _header_columns(matrix[header_row]).get('joined')
+    if joined_col is None:
+        return None
+    dates = [
+        dt
+        for row in matrix[header_row + 1 :]
+        if joined_col < len(row) and (dt := _parse_dt(row[joined_col])) is not None
+    ]
+    return min(dates).month if dates else None
 
 
 class WaitlistParser(Parser):
@@ -1611,16 +1646,19 @@ class WaitlistParser(Parser):
         week_anchor: datetime | None = None,
     ) -> None:
         """Ingest one waitlist 'Applicants' tab: a named waitlist row per applicant."""
+        matrix = list(ws.iter_rows(values_only=True))
+        header_row, dancer_col = _roster_header(matrix)
         title = _waitlist_title(term)
-        event_name = _WAITLIST_EVENTS.get((title, year))
+        month = _waitlist_joined_month(matrix, header_row)
+        # Prefer the month-qualified mapping (only the ambiguous 2022 Term B courses use it), then
+        # fall back to (title, year) for every other waitlist.
+        event_name = _WAITLIST_EVENTS.get((title, year, month)) or _WAITLIST_EVENTS.get((title, year))
         if event_name is None:
             raise ValueError(f'No event mapping for waitlist {title!r} ({year}); add it to _WAITLIST_EVENTS.')
         event_id = db.event_id_by_name(event_name)
         if event_id is None:
             raise ValueError(f'Waitlist {title!r} maps to event {event_name!r}, which is not in the database.')
 
-        matrix = list(ws.iter_rows(values_only=True))
-        header_row, dancer_col = _roster_header(matrix)
         for r in range(header_row + 1, len(matrix)):
             row = matrix[r]
             did = row[dancer_col] if dancer_col < len(row) else None
