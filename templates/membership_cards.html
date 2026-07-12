@@ -19,6 +19,10 @@
         <form id="card-selection-form">
             <label for="filter-first-name">Filter by First Name:</label>
             <input type="text" id="filter-first-name" placeholder="e.g. Alice">
+            <label>
+                <input type="checkbox" id="show-invalidated" role="switch">
+                Show expired / invalidated cards
+            </label>
             <button type="button" id="download-pdf-btn" disabled>Download selected cards as A4 PDF</button>
             <table class="responsive-table">
                 <thead>
@@ -35,7 +39,7 @@
                 </thead>
                 <tbody>
                     {% for card in cards %}
-                    <tr>
+                    <tr data-invalidated="{{ 'true' if card.is_invalidated else 'false' }}">
                         <td data-label="Select">
                             <input type="checkbox" name="card_uuid" value="{{ card.card_uuid }}">
                         </td>

@@ -95,20 +95,27 @@ document.addEventListener("DOMContentLoaded", function () {
     updateButtonState(); // Set initial state
 });
 
-// Filter the table based on the provided first name.
+// Filter the table by first name and, optionally, hide expired / invalidated cards.
 document.addEventListener("DOMContentLoaded", function () {
     const input = document.getElementById("filter-first-name");
+    const showInvalidated = document.getElementById("show-invalidated");
     const rows = document.querySelectorAll("tbody tr");
 
-    input.addEventListener("input", function () {
+    function applyFilters() {
         const filterValue = input.value.toLowerCase().trim();
+        const includeInvalidated = showInvalidated.checked;
 
         rows.forEach(row => {
-            const firstNameCell = row.cells[2];  // First name is in the 3rd column
-            const firstName = firstNameCell.textContent.toLowerCase();
-            row.style.display = firstName.includes(filterValue) ? "" : "none";
+            const firstName = row.cells[2].textContent.toLowerCase();  // First name is in the 3rd column
+            const invalidated = row.dataset.invalidated === "true";
+            const visible = firstName.includes(filterValue) && (includeInvalidated || !invalidated);
+            row.style.display = visible ? "" : "none";
         });
-    });
+    }
+
+    input.addEventListener("input", applyFilters);
+    showInvalidated.addEventListener("change", applyFilters);
+    applyFilters();
 });
 
 // Ensure reissue button is only enabled if a reason is selected.

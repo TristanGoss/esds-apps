@@ -101,6 +101,8 @@ async def fetch_membership_card_checks(additional_params: Optional[Dict] = None)
         member_details = [
             x for x in member_data if x['id'] == membership_card_details['relationships']['member']['data']['id']
         ][0]
+        raw_status = membership_card_details['attributes'].get('status')
+        raw_expires_at = membership_card_details['attributes'].get('expiresAt')
         checks.append(
             MembershipCardCheck(
                 member_uuid=member_details['id'],
@@ -112,6 +114,8 @@ async def fetch_membership_card_checks(additional_params: Optional[Dict] = None)
                 checked_by=d['relationships']['checkedBy']['data']['id']
                 if d['relationships']['checkedBy']['data'] is not None
                 else None,
+                status=MembershipCardStatus(raw_status) if raw_status is not None else None,
+                expires_at=datetime.fromisoformat(raw_expires_at) if raw_expires_at is not None else None,
             )
         )
 

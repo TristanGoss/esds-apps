@@ -13,7 +13,8 @@
         <h1>ESDS Membership Card Check Logs</h1>
         <p>
             The table below shows all of the card checks that have taken place within the last 30 days, latest first.
-            {{ num_unique_checks_in_last_hour }} unique cards were scanned in the last hour.
+            <span id="scan-count-valid">{{ num_unique_valid_checks_in_last_hour }}</span><span id="scan-count-all" hidden>{{ num_unique_checks_in_last_hour }}</span>
+            unique cards were scanned in the last hour.
         </p>
         <p>
             You can <a href="download?days_ago=30">download this information as a .csv file</a>,
@@ -21,6 +22,10 @@
         </p>
         <label for="filter-first-name">Filter by First Name:</label>
         <input type="text" id="filter-first-name" placeholder="e.g. Alice">
+        <label>
+            <input type="checkbox" id="show-invalidated" role="switch">
+            Show expired / invalidated cards
+        </label>
         <table class="responsive-table">
             <thead>
                 <tr>
@@ -33,7 +38,7 @@
             </thead>
             <tbody>
                 {% for check in checks %}
-                <tr>
+                <tr data-invalidated="{{ 'true' if check.is_invalidated else 'false' }}">
                     <td data-label="Card Number">{{ check.card_number }}</td>
                     <td data-label="First Name">{{ check.first_name }}</td>
                     <td data-label="Last Name">{{ check.last_name }}</td>

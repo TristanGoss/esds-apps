@@ -379,21 +379,24 @@ async def card_scanning_log(request: Request):
     ]
 
     # for easy checking of how many members have turned up to a class / AGM,
-    # report the number of unique cards scanned in the past hour.
-    unique_card_uuids_scanned_in_the_last_hour = set()
-    unique_checks_in_the_last_hour = []
+    # report the number of unique cards scanned in the past hour. We report two figures so the
+    # client-side "show expired / invalidated" toggle can switch between them: one counting only
+    # currently-valid cards, one counting every card scanned.
+    one_hour_ago = datetime.now(pytz.timezone('Europe/London')) - timedelta(hours=1)
+    all_card_uuids_in_last_hour = set()
+    valid_card_uuids_in_last_hour = set()
     for check in checks_in_the_last_30_days:
-        if (
-            check.checked_at > datetime.now(pytz.timezone('Europe/London')) - timedelta(hours=1)
-        ) and check.card_uuid not in unique_card_uuids_scanned_in_the_last_hour:
-            unique_card_uuids_scanned_in_the_last_hour.add(check.card_uuid)
-            unique_checks_in_the_last_hour.append(check)
+        if check.checked_at > one_hour_ago:
+            all_card_uuids_in_last_hour.add(check.card_uuid)
+            if not check.is_invalidated:
+                valid_card_uuids_in_last_hour.add(check.card_uuid)
 
     return config.TEMPLATES.TemplateResponse(
         request,
         'check_logs.html',
         {
-            'num_unique_checks_in_last_hour': len(unique_checks_in_the_last_hour),
+            'num_unique_valid_checks_in_last_hour': len(valid_card_uuids_in_last_hour),
+            'num_unique_checks_in_last_hour': len(all_card_uuids_in_last_hour),
             'checks': sorted(
                 checks_in_the_last_30_days,
                 reverse=True,
