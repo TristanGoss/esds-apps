@@ -1,17 +1,11 @@
-// Renders the three per-term summary charts on /attendance with Plotly, from the datasets
-// served by /attendance/summaries.json (built server-side in attendance/analysis.py, itself a
-// port of the matplotlib charts in working/attendance.ipynb). Three charts:
+// Renders the per-term summary charts on /attendance with ECharts, from the datasets served by
+// /attendance/summaries.json (built server-side in attendance/analysis.py, itself a port of the
+// matplotlib charts in working/attendance.ipynb). Five charts:
 //   1. beginner (Level 1) intake per term, one line per academic year (solid attended / dashed registered + waitlist);
 //   2. Level 2 class attendance per term with the paired social-only turnout (solid / dashed);
-//   3. cohort-retention heatmap with a teaching-team strip down the joining-cohort axis;
+//   3. cohort-retention heatmap (teaching team shown in the cell tooltip);
 //   4. the 2026 community survival curve (with / without the 30th anniversary);
 //   5. termly active-community counts since 2026 (active >= 1 / regulars >= 2, incl / excl the 30th).
-
-// Matplotlib's tab10, still used for the teaching-team colours on the retention heatmap.
-const TAB10 = [
-  '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
-  '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
-];
 
 // Matplotlib's turbo at 17 evenly spaced stops, interpolated in RGB below. The per-year charts
 // colour each academic year from this ramp (see yearColour); turbo is used over viridis because it
@@ -65,105 +59,118 @@ function yearColour(acadYear, positions) {
   return turbo(positions[acadYear] ?? 0);
 }
 
-// Matplotlib's YlGnBu, sampled light -> dark, so 0% retention reads as a gentle pale yellow and
-// 100% as a dark blue (less aggressive at zero than plasma was).
+// Matplotlib's YlGnBu, evenly spaced light -> dark, so 0% retention reads as a gentle pale yellow
+// and 100% as a dark blue. Fed to the heatmap's visualMap as an evenly-interpolated colour list.
 const YLGNBU = [
-  [0.0, '#ffffd9'], [0.125, '#edf8b1'], [0.25, '#c7e9b4'], [0.375, '#7fcdbb'],
-  [0.5, '#41b6c4'], [0.625, '#1d91c0'], [0.75, '#225ea8'], [0.875, '#253494'], [1.0, '#081d58'],
+  '#ffffd9', '#edf8b1', '#c7e9b4', '#7fcdbb', '#41b6c4', '#1d91c0', '#225ea8', '#253494', '#081d58',
 ];
 
-const PLOT_CONFIG = { responsive: true, displaylogo: false };
-const GRID = { showgrid: true, gridcolor: '#e7e7e7' };
+// Matplotlib's tab10, used to tint the retention heatmap's row labels by teaching team.
+const TAB10 = [
+  '#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd',
+  '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#17becf',
+];
 
-// A grey, data-less line so the solid/dashed distinction gets its own legend entry alongside
-// the per-year colour entries (Plotly has only one legend, unlike the notebook's two).
-function styleStub(name, dash) {
-  return {
-    type: 'scatter', mode: 'lines', name, x: [null], y: [null],
-    line: { color: '#4d4d4d', dash }, hoverinfo: 'skip', legendgroup: 'style',
-    legendgrouptitle: dash === 'solid' ? { text: 'Line style' } : undefined,
-  };
+// team (teacher) id -> colour; negative ids are "team unknown" and read grey.
+function teamColour(teacherId) {
+  return teacherId < 0 ? '#999999' : TAB10[teacherId % TAB10.length];
+}
+
+const GRID_LINE = { lineStyle: { color: '#e7e7e7' } };
+
+// Init an ECharts instance on the given element id, apply the option, and keep it responsive.
+function initChart(id, option) {
+  const chart = echarts.init(document.getElementById(id));
+  chart.setOption(option);
+  window.addEventListener('resize', () => chart.resize());
+  return chart;
 }
 
 // Charts 1 and 2 share a shape: per year a solid line (primary series) and an optional dashed
 // line (secondary series) in the same colour. solidKey/dashKey name the per-point fields; the
 // colour is the year's turbo colour, shared across both charts via the ranked-position map.
-function yearLineTraces(years, pointsKey, dashPointsKey, solidLabel, dashLabel, positions) {
-  const traces = [];
-  years.forEach((y, i) => {
+// Solid and dashed for one year share a series name, so a single legend entry toggles both.
+function yearLineSeries(years, pointsKey, dashPointsKey, solidLabel, dashLabel, positions) {
+  const series = [];
+  years.forEach((y) => {
     const colour = yearColour(y.acad_year, positions);
     const solid = y[pointsKey] || [];
-    traces.push({
-      type: 'scatter', mode: 'lines', name: y.label, legendgroup: 'year-' + i,
-      x: solid.map((p) => p.term_num), y: solid.map((p) => p.attended ?? p.value),
-      line: { color: colour, width: 2 },
-      hovertemplate: `${y.label} ${solidLabel}<br>term %{x}: %{y:.1f}<extra></extra>`,
+    series.push({
+      name: y.label, type: 'line', color: colour, lineStyle: { color: colour, width: 2 },
+      itemStyle: { color: colour },
+      data: solid.map((p) => ({
+        value: [p.term_num, p.attended ?? p.value],
+        tip: `${y.label} ${solidLabel}<br>term ${p.term_num}: ${(p.attended ?? p.value).toFixed(1)}`,
+      })),
     });
     // Pre-database years carry no secondary figures (null registered / empty socials), so drop the
     // null points; a year left with no dashed points gets no dashed line.
     const dashed = (y[dashPointsKey] || []).filter((p) => (p.registered ?? p.value) != null);
     if (dashed.length) {
-      traces.push({
-        type: 'scatter', mode: 'lines', name: y.label, legendgroup: 'year-' + i, showlegend: false,
-        x: dashed.map((p) => p.term_num), y: dashed.map((p) => p.registered ?? p.value),
-        line: { color: colour, width: 2, dash: 'dash' },
-        hovertemplate: `${y.label} ${dashLabel}<br>term %{x}: %{y:.1f}<extra></extra>`,
+      series.push({
+        name: y.label, type: 'line', color: colour,
+        lineStyle: { color: colour, width: 2, type: 'dashed' }, itemStyle: { color: colour },
+        data: dashed.map((p) => ({
+          value: [p.term_num, p.registered ?? p.value],
+          tip: `${y.label} ${dashLabel}<br>term ${p.term_num}: ${(p.registered ?? p.value).toFixed(1)}`,
+        })),
       });
     }
   });
-  traces.push(styleStub(solidLabel, 'solid'));
-  traces.push(styleStub(dashLabel, 'dash'));
-  return traces;
+  // Grey, data-less lines so the solid/dashed distinction gets its own legend entry.
+  series.push({ name: solidLabel, type: 'line', data: [], color: '#4d4d4d', lineStyle: { color: '#4d4d4d' } });
+  series.push({ name: dashLabel, type: 'line', data: [], color: '#4d4d4d', lineStyle: { color: '#4d4d4d', type: 'dashed' } });
+  return series;
 }
 
-function termAxis(years, pointsKeys) {
-  let maxTerm = 1;
+function maxTerm(years, pointsKeys) {
+  let m = 1;
   years.forEach((y) => pointsKeys.forEach((k) => (y[k] || []).forEach((p) => {
-    if (p.term_num > maxTerm) maxTerm = p.term_num;
+    if (p.term_num > m) m = p.term_num;
   })));
+  return m;
+}
+
+// Shared layout for the two per-year line charts. Solid and dashed lines share a series name, so
+// one legend entry toggles both; the chart's title is the page's own heading above it. The legend
+// wraps along the bottom so every year is visible at once, no scrolling.
+function yearLineOption(series, xMax, yTitle) {
   return {
-    title: 'term number within academic year (1 = first after summer break)',
-    tickmode: 'array', tickvals: Array.from({ length: maxTerm }, (_, i) => i + 1),
-    ...GRID,
+    grid: { left: 8, right: 16, top: 15, bottom: 100, containLabel: true },
+    tooltip: { trigger: 'item', confine: true, formatter: (p) => p.data.tip },
+    legend: { bottom: 4, textStyle: { fontSize: 11 } },
+    xAxis: {
+      type: 'value', min: 1, max: xMax, interval: 1, splitLine: { show: true, ...GRID_LINE },
+      name: 'term', nameLocation: 'middle', nameGap: 26,
+    },
+    yAxis: { type: 'value', name: yTitle, nameLocation: 'middle', nameGap: 38, min: 0, splitLine: GRID_LINE },
+    series,
   };
 }
 
 function renderBeginnerIntake(years, positions) {
-  const traces = yearLineTraces(years, 'points', 'points', 'attended', 'registered + waitlist', positions);
-  const layout = {
-    title: 'Mean Level 1 attendance per lesson, by academic year',
-    xaxis: termAxis(years, ['points']),
-    yaxis: { title: 'mean Level 1 dancers per lesson', rangemode: 'tozero', ...GRID },
-    legend: { groupclick: 'toggleitem' }, hovermode: 'closest',
-    margin: { l: 60, r: 30, t: 50, b: 60 }, plot_bgcolor: 'white', paper_bgcolor: 'white',
-  };
-  Plotly.newPlot('beginner-intake-chart', traces, layout, PLOT_CONFIG);
+  const series = yearLineSeries(years, 'points', 'points', 'attended', 'registered + waitlist', positions);
+  initChart('beginner-intake-chart', yearLineOption(
+    series, maxTerm(years, ['points']), 'mean Level 1 dancers per lesson',
+  ));
 }
 
 function renderLevel2Socials(years, positions) {
-  const traces = yearLineTraces(
+  const series = yearLineSeries(
     years, 'class_points', 'social_points', 'Level 2 class', 'social-only tickets', positions
   );
-  const layout = {
-    title: 'Mean Level 2 and social-only attendance per term, by academic year',
-    xaxis: termAxis(years, ['class_points', 'social_points']),
-    yaxis: { title: 'mean attendees per session', rangemode: 'tozero', ...GRID },
-    legend: { groupclick: 'toggleitem' }, hovermode: 'closest',
-    margin: { l: 60, r: 30, t: 50, b: 60 }, plot_bgcolor: 'white', paper_bgcolor: 'white',
-  };
-  Plotly.newPlot('level2-socials-chart', traces, layout, PLOT_CONFIG);
-}
-
-function teamColour(teacherId) {
-  return teacherId < 0 ? '#d9d9d9' : TAB10[teacherId % TAB10.length];
+  initChart('level2-socials-chart', yearLineOption(
+    series, maxTerm(years, ['class_points', 'social_points']), 'mean attendees per session',
+  ));
 }
 
 // Last-rendered datasets, kept so we can re-render in place when names are unlocked or re-locked.
 let retentionData = null;
+let retentionChart = null;
 let communitySelection = null; // { scope, minDates, dancers } of the clicked community point
 let termlySelection = null; // { scope, minActivities, termStart, label, dancers } of the clicked termly point
 
-// team.id -> legend label. Locked (or no passphrase yet): the stripped DNC- codes the server sent.
+// team.id -> label. Locked (or no passphrase yet): the stripped DNC- codes the server sent.
 // Unlocked: each team's teachers decrypted to first names, locally. Async because decryption is.
 async function teamLabelMap(data) {
   const encByDancer = data.teacher_enc || {};
@@ -190,113 +197,101 @@ async function teamLabelMap(data) {
   return map;
 }
 
+// Cohort-retention heatmap: rows are joining cohorts (earliest at top), columns are terms-since,
+// colour is % of the cohort still active. The teaching team is carried in each cell's tooltip.
 async function renderCohortRetention(data) {
   retentionData = data;
   const labelMap = await teamLabelMap(data);
   const terms = data.terms; // ordered by term idx
   const n = terms.length;
   const z = data.matrix; // z[cohort][offset], null where impossible / no cohort
-  const offsets = Array.from({ length: n }, (_, j) => j);
-  const yIdx = Array.from({ length: n }, (_, i) => i);
-  const labels = terms.map((t) => `${t.label}  (n=${t.total})`);
+  const offsets = Array.from({ length: n }, (_, j) => String(j));
+  const cohortLabels = terms.map((t) => `${t.label}  (n=${t.total})`);
 
-  const heatmap = {
-    type: 'heatmap', x: offsets, y: yIdx, z, zmin: 0, zmax: 100,
-    colorscale: YLGNBU, hoverongaps: false,
-    colorbar: { title: { text: '% of cohort<br>still active', side: 'right' }, thickness: 14 },
-    // customdata must match the z grid (rows x cols) for per-cell hover; carry the cohort label
-    // across every cell in its row. A 1D array isn't mapped to cells, so %{customdata} stays literal.
-    customdata: z.map((row, i) => row.map(() => terms[i].label)),
-    hovertemplate: 'joined %{customdata}<br>%{x} terms later<br>%{z:.0f}% still active<extra></extra>',
-  };
-
-  // Per-cell percentage labels, white on the dark (high) end and black on the light end, as in
-  // the notebook. Plotly heatmap text shares one font colour, so use per-cell annotations.
-  const annotations = [];
+  // One data item per non-null cell: [offset, cohort, %], carrying the cohort / team text for
+  // the tooltip.
+  const cells = [];
   for (let i = 0; i < n; i++) {
     for (let j = 0; j < n; j++) {
-      if (z[i][j] === null) continue;
-      annotations.push({
-        x: j, y: i, text: String(Math.round(z[i][j])), showarrow: false,
-        font: { size: 9, color: z[i][j] > 55 ? 'white' : 'black' },
+      const v = z[i][j];
+      if (v === null) continue;
+      cells.push({
+        value: [j, i, v],
+        coh: terms[i].label, team: labelMap[terms[i].teacher_id],
       });
     }
   }
 
-  // Teaching-team strip: a coloured rectangle per joining cohort, just left of the grid. Shapes
-  // give precise placement; Plotly can't render a categorical second colour-axis on a heatmap.
-  const shapes = [];
-  terms.forEach((t, i) => {
-    shapes.push({
-      type: 'rect', xref: 'x', yref: 'y', x0: -1.6, x1: -0.6, y0: i - 0.5, y1: i + 0.5,
-      fillcolor: teamColour(t.teacher_id), line: { width: 0 },
-    });
-  });
-
-  // Data-less square markers so each distinct teaching team gets a legend entry.
-  const teamLegend = data.teams.map((team) => ({
-    type: 'scatter', mode: 'markers', name: labelMap[team.id], x: [null], y: [null],
-    marker: { size: 10, color: teamColour(team.id), symbol: 'square' }, hoverinfo: 'skip',
-  }));
-
-  const layout = {
-    title: 'Cohort retention: % of each joining term still active N terms later',
-    annotations, shapes,
-    xaxis: {
-      title: 'terms since joining', range: [-2, n - 0.5],
-      tickmode: 'array', tickvals: offsets, constrain: 'domain',
+  const option = {
+    grid: { left: 8, right: 65, top: 15, bottom: 40, containLabel: true },
+    tooltip: {
+      trigger: 'item', confine: true,
+      formatter: (p) => `joined ${p.data.coh} (team ${p.data.team})<br>` +
+        `${p.value[0]} terms later<br>${Math.round(p.value[2])}% still active`,
     },
-    yaxis: {
-      autorange: 'reversed', // cohort 0 (earliest) at the top, as in the notebook
-      tickmode: 'array', tickvals: yIdx, ticktext: labels, tickfont: { size: 9 },
+    xAxis: { type: 'category', data: offsets, name: 'terms since joining', nameLocation: 'middle', nameGap: 26, splitArea: { show: true } },
+    yAxis: {
+      type: 'category', data: cohortLabels, inverse: true, splitArea: { show: true },
+      // Tint each row label by its teaching team, so intakes that shared a team read at a glance.
+      axisLabel: { fontSize: 9, color: (value, index) => teamColour(terms[index].teacher_id) },
     },
-    legend: { title: { text: 'Teaching team' }, orientation: 'h', y: -0.12, font: { size: 10 } },
-    margin: { l: 120, r: 20, t: 50, b: 90 }, plot_bgcolor: 'white', paper_bgcolor: 'white',
+    visualMap: {
+      type: 'continuous', min: 0, max: 100, calculable: true, right: 0, top: 'middle',
+      itemHeight: 160, inRange: { color: YLGNBU }, text: ['100%', '0%'],
+      textStyle: { fontSize: 10 },
+    },
+    series: [{ type: 'heatmap', data: cells }],
   };
-  Plotly.newPlot('cohort-retention-chart', [heatmap, ...teamLegend], layout, PLOT_CONFIG);
+
+  if (!retentionChart) {
+    retentionChart = echarts.init(document.getElementById('cohort-retention-chart'));
+    window.addEventListener('resize', () => retentionChart.resize());
+  }
+  retentionChart.setOption(option, true); // notMerge: labels/tooltips fully replaced on unlock
 }
 
 // Community survival curve for 2026: dancers attending at least each share of the calendar, with
 // and without the 30th anniversary. Clicking a point downloads that group's DNC ids.
 function renderCommunity2026(data) {
   const totalDates = data.total_dates || 0;
-  const series = [
+  const defs = [
     { key: 'incl_30th', label: 'incl. 30th anniversary', colour: '#1f77b4', scope: 'incl' },
     { key: 'excl_30th', label: 'excl. 30th anniversary', colour: '#d62728', scope: 'excl' },
   ];
-  const traces = series.map((s) => {
-    const pts = data[s.key] || [];
-    return {
-      type: 'scatter', mode: 'lines+markers', name: s.label,
-      x: pts.map((p) => p.pct), y: pts.map((p) => p.dancers),
-      customdata: pts.map((p) => [s.scope, p.min_dates]),
-      marker: { size: 7, color: s.colour }, line: { color: s.colour, width: 2 },
-      hovertemplate:
-        `${s.label}<br>at least %{customdata[1]} dates (%{x:.0f}% of calendar)<br>` +
-        '%{y} dancers<br><i>click to download their ids</i><extra></extra>',
-    };
-  });
+  const series = defs.map((s) => ({
+    name: s.label, type: 'line', color: s.colour, symbolSize: 7,
+    lineStyle: { color: s.colour, width: 2 }, itemStyle: { color: s.colour },
+    data: (data[s.key] || []).map((p) => ({
+      value: [p.pct, p.dancers], raw: [s.scope, p.min_dates],
+      tip: `${s.label}<br>at least ${p.min_dates} dates (${Math.round(p.pct)}% of calendar)<br>` +
+        `${p.dancers} dancers<br><i>click to download their ids</i>`,
+    })),
+  }));
 
-  const layout = {
-    title: 'The 2026 community: how big is it, and how committed?',
-    xaxis: {
-      title: `share of the 2026 calendar attended (%) — ${totalDates} dates in all`,
-      range: [0, 100], tickmode: 'array', tickvals: Array.from({ length: 11 }, (_, i) => i * 10), ...GRID,
+  const chart = initChart('community-2026-chart', {
+    grid: { left: 8, right: 12, top: 15, bottom: 60, containLabel: true },
+    tooltip: { trigger: 'item', confine: true, formatter: (p) => p.data.tip },
+    legend: { bottom: 4 },
+    xAxis: {
+      type: 'value', min: 0, max: 100, interval: 10, splitLine: { show: true, ...GRID_LINE },
+      name: `% of 2026 calendar (${totalDates} dates)`, nameLocation: 'middle', nameGap: 26,
     },
-    yaxis: { title: 'dancers attending at least this share', rangemode: 'tozero', ...GRID },
-    hovermode: 'closest', legend: { x: 0.98, y: 0.98, xanchor: 'right', yanchor: 'top' },
-    margin: { l: 60, r: 30, t: 50, b: 60 }, plot_bgcolor: 'white', paper_bgcolor: 'white',
-  };
-
-  Plotly.newPlot('community-2026-chart', traces, layout, PLOT_CONFIG).then((gd) => {
-    gd.on('plotly_click', (ev) => {
-      const cd = ev.points[0].customdata;
-      if (!cd) return;
-      const [scope, minDates] = cd;
-      communitySelection = { scope, minDates, dancers: ev.points[0].y };
-      renderCommunityPanel();
-    });
+    yAxis: {
+      type: 'value', name: 'dancers attending at least this share', nameLocation: 'middle',
+      nameGap: 38, min: 0, splitLine: GRID_LINE,
+    },
+    // Pinch / scroll to zoom and drag to pan the horizontal axis only, as on the scatter.
+    dataZoom: [{ type: 'inside', xAxisIndex: 0, filterMode: 'none' }],
+    series,
   });
+
+  chart.on('click', (p) => {
+    if (!p.data || !p.data.raw) return;
+    const [scope, minDates] = p.data.raw;
+    communitySelection = { scope, minDates, dancers: p.value[1] };
+    renderCommunityPanel();
+  });
+  chart.getZr().on('dblclick', () => chart.dispatchAction({ type: 'dataZoom', start: 0, end: 100 }));
 }
 
 // Render the pinned community-download panel for the currently-selected point. Locked: a hint to
@@ -347,41 +342,47 @@ async function downloadCommunity(scope, minDates, btn) {
   }
 }
 
-// Termly active community since 2026 (Plot 8): distinct dancers per term with >= 1 activity
-// (active) and >= 2 (regulars), each counted including and excluding the 30th anniversary. Clicking
-// a point downloads that term/threshold/scope's dancers, as on the survival curve above.
+// Termly active community since 2026: distinct dancers per term with >= 1 activity (active) and
+// >= 2 (regulars), each counted including and excluding the 30th anniversary. Clicking a point
+// downloads that term/threshold/scope's dancers, as on the survival curve above.
 function renderTermlyActive(points) {
   const labels = points.map((p) => p.label);
+  // symbol 'circle' (not the default 'emptyCircle', whose ring uses the fill colour) so hollow
+  // regulars markers read as a white disc with a coloured ring rather than vanishing on white.
   const line = (key, colour, dash, hollow, name, scope, minAct) => ({
-    type: 'scatter', mode: 'lines+markers', name,
-    x: labels, y: points.map((p) => p[key]),
-    customdata: points.map((p) => [scope, minAct, p.term_start, p.label]),
-    line: { color: colour, width: 2, dash },
-    marker: { size: 9, symbol: 'circle', color: hollow ? 'white' : colour, line: { color: colour, width: 2 } },
-    hovertemplate: `${name}<br>%{x}: %{y} dancers<br><i>click to download their ids</i><extra></extra>`,
+    name, type: 'line', color: colour, symbol: 'circle', symbolSize: 9,
+    lineStyle: { color: colour, width: 2, type: dash },
+    itemStyle: { color: hollow ? '#fff' : colour, borderColor: colour, borderWidth: 2 },
+    data: points.map((p) => ({
+      value: p[key], raw: [scope, minAct, p.term_start, p.label],
+      tip: `${name}<br>${p.label}: ${p[key]} dancers<br><i>click to download their ids</i>`,
+    })),
   });
   // incl drawn first so the coincident excl marker sits on top where the two lines meet.
-  const traces = [
+  const series = [
     line('active_incl', '#1f77b4', 'solid', false, 'active, incl. 30th (>= 1)', 'incl', 1),
     line('active_excl', '#d62728', 'solid', false, 'active, excl. 30th (>= 1)', 'excl', 1),
-    line('regular_incl', '#1f77b4', 'dash', true, 'regulars, incl. 30th (>= 2)', 'incl', 2),
-    line('regular_excl', '#d62728', 'dash', true, 'regulars, excl. 30th (>= 2)', 'excl', 2),
+    line('regular_incl', '#1f77b4', 'dashed', true, 'regulars, incl. 30th (>= 2)', 'incl', 2),
+    line('regular_excl', '#d62728', 'dashed', true, 'regulars, excl. 30th (>= 2)', 'excl', 2),
   ];
-  const layout = {
-    title: 'Termly active community since 2026 (all event types)',
-    xaxis: { title: 'teaching term', type: 'category', ...GRID },
-    yaxis: { title: 'distinct dancers', rangemode: 'tozero', ...GRID },
-    hovermode: 'closest', legend: { x: 0.98, y: 0.98, xanchor: 'right', yanchor: 'top' },
-    margin: { l: 60, r: 30, t: 50, b: 60 }, plot_bgcolor: 'white', paper_bgcolor: 'white',
-  };
-  Plotly.newPlot('termly-active-chart', traces, layout, PLOT_CONFIG).then((gd) => {
-    gd.on('plotly_click', (ev) => {
-      const cd = ev.points[0].customdata;
-      if (!cd) return;
-      const [scope, minActivities, termStart, label] = cd;
-      termlySelection = { scope, minActivities, termStart, label, dancers: ev.points[0].y };
-      renderTermlyPanel();
-    });
+
+  const chart = initChart('termly-active-chart', {
+    grid: { left: 8, right: 16, top: 15, bottom: 80, containLabel: true },
+    tooltip: { trigger: 'item', confine: true, formatter: (p) => p.data.tip },
+    legend: { bottom: 4, textStyle: { fontSize: 11 } },
+    xAxis: {
+      type: 'category', data: labels, name: 'teaching term', nameLocation: 'middle', nameGap: 26,
+      axisLabel: { fontSize: 10 }, splitLine: { show: true, ...GRID_LINE },
+    },
+    yAxis: { type: 'value', name: 'distinct dancers', nameLocation: 'middle', nameGap: 38, min: 0, splitLine: GRID_LINE },
+    series,
+  });
+
+  chart.on('click', (p) => {
+    if (!p.data || !p.data.raw) return;
+    const [scope, minActivities, termStart, label] = p.data.raw;
+    termlySelection = { scope, minActivities, termStart, label, dancers: p.value };
+    renderTermlyPanel();
   });
 }
 
@@ -462,8 +463,8 @@ async function renderSummaries() {
   renderCommunity2026(payload.community_2026 || { total_dates: 0, incl_30th: [], excl_30th: [] });
   renderTermlyActive(payload.termly_active || []);
 
-  // When names are unlocked or re-locked, retranslate the retention legend and refresh the
-  // community download panel (the scatter download handles itself in attendance.js).
+  // When names are unlocked or re-locked, retranslate the retention tooltips and refresh the
+  // community / termly download panels (the scatter download handles itself in attendance.js).
   AttendanceCrypto.onChange(() => {
     if (retentionData) renderCohortRetention(retentionData);
     renderCommunityPanel();

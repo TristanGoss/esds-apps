@@ -165,7 +165,7 @@ async def attendance_overview(request: Request):
 
 @app.get('/attendance/activities.json')
 async def attendance_activities(request: Request, _: None = Depends(require_valid_cookie)):
-    """Serve the all-activities scatter data as JSON for the client-side Plotly chart.
+    """Serve the all-activities scatter data as JSON for the client-side ECharts chart.
 
     Guarded by the cookie dependency (not the redirecting login_required) so an unauthenticated
     fetch gets a clean 401 rather than a 302 into Google's OAuth flow.

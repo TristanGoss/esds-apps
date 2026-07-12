@@ -7,8 +7,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
     <link rel="stylesheet" href="/public/css/site.css">
-    <!-- Plotly does all the rendering, zoom/pan, hover and click client-side. Pinned major version. -->
-    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+    <!-- ECharts does all the rendering, zoom/pan, hover and click client-side. Pinned major version. -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
 </head>
 
 <body>
@@ -37,8 +37,9 @@
         <p>
             Every activity (an individual lesson or social) we hold a record for is one point below:
             its date against the number of people. This is a high-detail view intended for data access.
-            Drag to zoom, double-click to reset, hover a point for a summary, and click a point to
-            pin its full breakdown beneath the chart. Once you enter the PII passphrase in
+            Pinch or scroll to zoom and drag to pan the date axis, double-click to reset;
+            hover or tap a point for a summary, and click a point to pin its full breakdown beneath the
+            chart. Once you enter the PII passphrase in
             the box above, the breakdown offers a download of that activity's complete record as a CSV
             — named attendees with their first and last names, anonymous head-counts, and the parent
             event details; without the passphrase the breakdown still shows but the download is
@@ -57,6 +58,7 @@
 
         <div id="chart-status"></div>
         <div id="attendance-chart" style="width:100%;height:560px;"></div>
+        <div id="attendance-legend" class="chart-legend"></div>
 
         <article id="point-details" hidden>
             <header><strong>Selected activity</strong></header>
@@ -97,11 +99,12 @@
             Each row is the term a dancer first appeared; each column is the number of terms
             later; the colour is the share of that joining cohort still active then. Reading down
             a column shows whether newer intakes retain better than older ones; reading across a
-            row shows the shape of a cohort's drop-off after joining. The coloured strip on the
-            left marks the teaching team that ran each joining term, so retention can be read
-            against who taught that intake. Presence here means appearing on any sheet that term,
+            row shows the shape of a cohort's drop-off after joining. Each joining term's row label is
+            tinted by its teaching team, so intakes that shared a team stand out at a glance; hover or
+            tap a cell to see that team by name, and read retention against who taught that
+            intake. Presence here means appearing on any sheet that term,
             attended or not, because turnout was only recorded consistently from around 2024.
-            The teaching teams are labelled with id codes by default; enter the PII passphrase in the box
+            The teaching team shows as id codes by default; enter the PII passphrase in the box
             at the top of the page to relabel them with the teachers' first names.
         </p>
         <div id="cohort-retention-chart" style="width:100%;height:680px;"></div>

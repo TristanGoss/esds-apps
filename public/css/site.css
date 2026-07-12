@@ -77,3 +77,37 @@ td, th {
     margin-bottom: 0;
     white-space: nowrap;
 }
+
+/* Manual key for the attendance scatter: ECharts has no built-in colour/shape legend, so
+   attendance.js builds this. A wrapping flex row keeps it readable on narrow screens. */
+.chart-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 1rem;
+    margin: 0.25rem 0 1.5rem;
+    font-size: 0.8rem;
+}
+
+.chart-legend .legend-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.25rem 0.75rem;
+}
+
+.chart-legend .legend-group > strong {
+    margin-right: 0.15rem;
+}
+
+.chart-legend .legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    white-space: nowrap;
+}
+
+.chart-legend .legend-item svg {
+    width: 14px;
+    height: 14px;
+    flex: 0 0 auto;
+}
