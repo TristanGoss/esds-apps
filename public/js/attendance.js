@@ -43,6 +43,14 @@ const DANCER_GREY = '#555555';
 const FALLBACK_COLOUR = '#000000';
 const MARKER_SIZE = 11;
 
+// Theme-aware chart text / gridline colours, detected once at load (ECharts has no dark mode of
+// its own). Exposed globally so attendance_summaries.js, which loads after this file, reuses it.
+const AttendanceTheme = (() => {
+  const dark = !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  return { dark, text: dark ? '#c6c6c6' : '#333333', grid: dark ? '#3a3a3a' : '#e7e7e7' };
+})();
+window.AttendanceTheme = AttendanceTheme;
+
 function difficultyOf(row) {
   return row.difficulty || 'other';
 }
@@ -94,7 +102,7 @@ function dataSeries(rows) {
     return {
       value: [ts(r.date), r.total],
       symbol: echartsSymbol(DIFFICULTY_SYMBOLS[difficultyOf(r)] || 'circle'),
-      itemStyle: { color: colour, borderColor: '#fff', borderWidth: 0.6, opacity: 0.85 },
+      itemStyle: { color: colour, opacity: 0.85 },
       cd: customdata(r), x: (r.date || '').slice(0, 10), tip: attendedTip(r),
     };
   });
@@ -129,7 +137,7 @@ function earlyMeanSeries(means) {
     symbol: echartsSymbol(DIFFICULTY_SYMBOLS[difficulty]),
     data: rows.map((m) => ({
       value: [ts(m.date), m.mean],
-      itemStyle: { color: EVENT_COLOURS.course, borderColor: '#fff', borderWidth: 0.6, opacity: 0.85 },
+      itemStyle: { color: EVENT_COLOURS.course, opacity: 0.85 },
       tip: `<b>Term mean (old records)</b><br>${label}<br>${(m.date || '').slice(0, 4)}<br>` +
         `mean attended: ${m.mean.toFixed(1)}`,
     })),
@@ -253,10 +261,14 @@ async function render() {
   chart.setOption({
     grid: { left: 8, right: 12, top: 15, bottom: 40, containLabel: true },
     tooltip: { trigger: 'item', confine: true, formatter: (p) => p.data.tip },
-    xAxis: { type: 'time', splitLine: { show: true, lineStyle: { color: '#e7e7e7' } } },
+    xAxis: {
+      type: 'time', axisLabel: { color: AttendanceTheme.text },
+      splitLine: { show: true, lineStyle: { color: AttendanceTheme.grid } },
+    },
     yAxis: {
       type: 'value', name: 'people', nameLocation: 'middle', nameGap: 38, scale: true,
-      splitLine: { lineStyle: { color: '#e7e7e7' } },
+      nameTextStyle: { color: AttendanceTheme.text }, axisLabel: { color: AttendanceTheme.text },
+      splitLine: { lineStyle: { color: AttendanceTheme.grid } },
     },
     // Pinch / scroll to zoom and drag to pan the date axis; filterMode 'filter' drops out-of-view
     // points so the y-axis (scale: true) re-fits to the visible data. Double-click resets.

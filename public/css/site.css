@@ -12,6 +12,13 @@ body > nav {
     margin-bottom: 1rem;
 }
 
+/* The nav is a single Pico flex row of links; with this many items it overflows a phone's width
+   and stretches the whole page. Let it wrap onto multiple rows so nothing forces a wider viewport. */
+body > nav ul {
+    flex-wrap: wrap;
+    row-gap: 0.15rem;
+}
+
 .danger {
     --pico-background-color: #c0392b;
     --pico-border-color: #a93226;

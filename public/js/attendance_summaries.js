@@ -76,7 +76,9 @@ function teamColour(teacherId) {
   return teacherId < 0 ? '#999999' : TAB10[teacherId % TAB10.length];
 }
 
-const GRID_LINE = { lineStyle: { color: '#e7e7e7' } };
+// AttendanceTheme (dark-mode text / gridline colours) is defined in attendance.js, which loads first.
+const GRID_LINE = { lineStyle: { color: AttendanceTheme.grid } };
+const AXIS_TEXT = { nameTextStyle: { color: AttendanceTheme.text }, axisLabel: { color: AttendanceTheme.text } };
 
 // Init an ECharts instance on the given element id, apply the option, and keep it responsive.
 function initChart(id, option) {
@@ -138,12 +140,12 @@ function yearLineOption(series, xMax, yTitle) {
   return {
     grid: { left: 8, right: 16, top: 15, bottom: 100, containLabel: true },
     tooltip: { trigger: 'item', confine: true, formatter: (p) => p.data.tip },
-    legend: { bottom: 4, textStyle: { fontSize: 11 } },
+    legend: { bottom: 4, textStyle: { fontSize: 11, color: AttendanceTheme.text } },
     xAxis: {
       type: 'value', min: 1, max: xMax, interval: 1, splitLine: { show: true, ...GRID_LINE },
-      name: 'term', nameLocation: 'middle', nameGap: 26,
+      name: 'term', nameLocation: 'middle', nameGap: 26, ...AXIS_TEXT,
     },
-    yAxis: { type: 'value', name: yTitle, nameLocation: 'middle', nameGap: 38, min: 0, splitLine: GRID_LINE },
+    yAxis: { type: 'value', name: yTitle, nameLocation: 'middle', nameGap: 38, min: 0, splitLine: GRID_LINE, ...AXIS_TEXT },
     series,
   };
 }
@@ -223,23 +225,24 @@ async function renderCohortRetention(data) {
   }
 
   const option = {
-    grid: { left: 8, right: 65, top: 15, bottom: 40, containLabel: true },
+    grid: { left: 8, right: 12, top: 15, bottom: 40, containLabel: true },
     tooltip: {
       trigger: 'item', confine: true,
       formatter: (p) => `joined ${p.data.coh} (team ${p.data.team})<br>` +
         `${p.value[0]} terms later<br>${Math.round(p.value[2])}% still active`,
     },
-    xAxis: { type: 'category', data: offsets, name: 'terms since joining', nameLocation: 'middle', nameGap: 26, splitArea: { show: true } },
+    xAxis: {
+      type: 'category', data: offsets, name: 'terms since joining', nameLocation: 'middle',
+      nameGap: 26, splitArea: { show: true }, ...AXIS_TEXT,
+    },
     yAxis: {
       type: 'category', data: cohortLabels, inverse: true, splitArea: { show: true },
       // Tint each row label by its teaching team, so intakes that shared a team read at a glance.
       axisLabel: { fontSize: 9, color: (value, index) => teamColour(terms[index].teacher_id) },
     },
-    visualMap: {
-      type: 'continuous', min: 0, max: 100, calculable: true, right: 0, top: 'middle',
-      itemHeight: 160, inRange: { color: YLGNBU }, text: ['100%', '0%'],
-      textStyle: { fontSize: 10 },
-    },
+    // Colour mapping only: the gradient bar is hidden (show: false keeps cell colouring but drops
+    // the space-hungry UI). Each cell's exact % is in its tooltip.
+    visualMap: { type: 'continuous', min: 0, max: 100, show: false, inRange: { color: YLGNBU } },
     series: [{ type: 'heatmap', data: cells }],
   };
 
@@ -271,14 +274,14 @@ function renderCommunity2026(data) {
   const chart = initChart('community-2026-chart', {
     grid: { left: 8, right: 12, top: 15, bottom: 60, containLabel: true },
     tooltip: { trigger: 'item', confine: true, formatter: (p) => p.data.tip },
-    legend: { bottom: 4 },
+    legend: { bottom: 4, textStyle: { color: AttendanceTheme.text } },
     xAxis: {
       type: 'value', min: 0, max: 100, interval: 10, splitLine: { show: true, ...GRID_LINE },
-      name: `% of 2026 calendar (${totalDates} dates)`, nameLocation: 'middle', nameGap: 26,
+      name: `% of 2026 calendar (${totalDates} dates)`, nameLocation: 'middle', nameGap: 26, ...AXIS_TEXT,
     },
     yAxis: {
       type: 'value', name: 'dancers attending at least this share', nameLocation: 'middle',
-      nameGap: 38, min: 0, splitLine: GRID_LINE,
+      nameGap: 38, min: 0, splitLine: GRID_LINE, ...AXIS_TEXT,
     },
     // Pinch / scroll to zoom and drag to pan the horizontal axis only, as on the scatter.
     dataZoom: [{ type: 'inside', xAxisIndex: 0, filterMode: 'none' }],
@@ -352,7 +355,7 @@ function renderTermlyActive(points) {
   const line = (key, colour, dash, hollow, name, scope, minAct) => ({
     name, type: 'line', color: colour, symbol: 'circle', symbolSize: 9,
     lineStyle: { color: colour, width: 2, type: dash },
-    itemStyle: { color: hollow ? '#fff' : colour, borderColor: colour, borderWidth: 2 },
+    itemStyle: { color: hollow ? 'transparent' : colour, borderColor: colour, borderWidth: 2 },
     data: points.map((p) => ({
       value: p[key], raw: [scope, minAct, p.term_start, p.label],
       tip: `${name}<br>${p.label}: ${p[key]} dancers<br><i>click to download their ids</i>`,
@@ -369,12 +372,13 @@ function renderTermlyActive(points) {
   const chart = initChart('termly-active-chart', {
     grid: { left: 8, right: 16, top: 15, bottom: 80, containLabel: true },
     tooltip: { trigger: 'item', confine: true, formatter: (p) => p.data.tip },
-    legend: { bottom: 4, textStyle: { fontSize: 11 } },
+    legend: { bottom: 4, textStyle: { fontSize: 11, color: AttendanceTheme.text } },
     xAxis: {
       type: 'category', data: labels, name: 'teaching term', nameLocation: 'middle', nameGap: 26,
-      axisLabel: { fontSize: 10 }, splitLine: { show: true, ...GRID_LINE },
+      axisLabel: { fontSize: 10, color: AttendanceTheme.text }, nameTextStyle: { color: AttendanceTheme.text },
+      splitLine: { show: true, ...GRID_LINE },
     },
-    yAxis: { type: 'value', name: 'distinct dancers', nameLocation: 'middle', nameGap: 38, min: 0, splitLine: GRID_LINE },
+    yAxis: { type: 'value', name: 'distinct dancers', nameLocation: 'middle', nameGap: 38, min: 0, splitLine: GRID_LINE, ...AXIS_TEXT },
     series,
   });
 
