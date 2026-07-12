@@ -118,3 +118,77 @@ td, th {
     height: 14px;
     flex: 0 0 auto;
 }
+
+/* Responsive "stacked card" tables: on narrow screens each row reflows into a labelled card;
+   desktop keeps the normal table. Opt in per table with class="responsive-table"; every <td>
+   needs a data-label matching its column. */
+@media (max-width: 600px) {
+    /* Hide the header row visually but keep it for screen readers; labels come from data-label. */
+    .responsive-table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+    }
+
+    .responsive-table,
+    .responsive-table tbody,
+    .responsive-table tr,
+    .responsive-table td {
+        display: block;
+        width: 100%;
+    }
+
+    .responsive-table tr {
+        margin-bottom: 1rem;
+        padding: 0.5rem 0.75rem;
+        border: 1px solid var(--pico-muted-border-color, #e7e7e7);
+        border-radius: var(--pico-border-radius, 0.25rem);
+    }
+
+    .responsive-table td {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 1rem;
+        padding: 0.25rem 0;
+        border: none;              /* drop Pico's per-cell borders inside the card */
+        white-space: normal;       /* override the global td/th nowrap so values can wrap */
+        overflow-wrap: anywhere;   /* break long unspaced values (emails, URLs) so they don't spill */
+        text-align: right;
+    }
+
+    /* The column name, drawn from data-label, as a bold key on the left of each row. Sized to its
+       own text (not a fixed column) so the value gets all the remaining width before it wraps. */
+    .responsive-table td::before {
+        content: attr(data-label);
+        flex: 0 0 auto;
+        font-weight: bold;
+        text-align: left;
+        white-space: nowrap;
+        color: var(--pico-muted-color, inherit);
+    }
+
+    /* Action cells hold buttons, not a single value: stack the label above them in a full-width
+       column (keeping .action-cell's own gap) rather than the generic label | value row. */
+    .responsive-table td.action-cell {
+        flex-direction: column;
+        align-items: flex-start;
+        justify-content: flex-start;
+        text-align: left;
+    }
+
+    .responsive-table td.action-cell::before {
+        flex: 0 0 auto;
+    }
+
+    /* Undo the value-wrapping for controls: buttons/selects shouldn't break mid-word (e.g. the
+       Reissue button splitting across lines) the way long email/URL values should. */
+    .responsive-table td button,
+    .responsive-table td select {
+        overflow-wrap: normal;
+        white-space: nowrap;
+    }
+}

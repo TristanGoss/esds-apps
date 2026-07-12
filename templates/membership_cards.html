@@ -20,7 +20,7 @@
             <label for="filter-first-name">Filter by First Name:</label>
             <input type="text" id="filter-first-name" placeholder="e.g. Alice">
             <button type="button" id="download-pdf-btn" disabled>Download selected cards as A4 PDF</button>
-            <table>
+            <table class="responsive-table">
                 <thead>
                     <tr>
                         <th>Select</th>
@@ -36,24 +36,22 @@
                 <tbody>
                     {% for card in cards %}
                     <tr>
-                        <td>
+                        <td data-label="Select">
                             <input type="checkbox" name="card_uuid" value="{{ card.card_uuid }}">
                         </td>
-                        <td>{{ card.card_number }}</td>
-                        <td>{{ card.first_name }}</td>
-                        <td>{{ card.last_name }}</td>
-                        <td>{{ card.email }}</td>
-                        <td>{{ card.status.value }}</td>
-                        <td>{{ card.expires_at.strftime("%d-%m-%Y") }}</td>
-                        <td class="action-cell">
+                        <td data-label="Card Number">{{ card.card_number }}</td>
+                        <td data-label="First Name">{{ card.first_name }}</td>
+                        <td data-label="Last Name">{{ card.last_name }}</td>
+                        <td data-label="Email">{{ card.email }}</td>
+                        <td data-label="Status">{{ card.status.value }}</td>
+                        <td data-label="Expires On">{{ card.expires_at.strftime("%d-%m-%Y") }}</td>
+                        <td class="action-cell" data-label="Actions">
                             <div class="action-group">
                                 <button type="button"
                                         onclick="showImageModal('{{ card.card_number }}')"
                                         class="action-button">
                                     View Front
                                 </button>
-                            </div>
-                            <div class="action-group">
                                 <button type="button"
                                         id="cancel-btn-{{ card.card_uuid }}"
                                         data-uuid="{{ card.card_uuid }}"

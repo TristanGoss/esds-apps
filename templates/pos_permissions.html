@@ -29,7 +29,7 @@
             <br>
             <label for="filter-first-name">Filter by First Name:</label>
             <input type="text" id="filter-first-name" placeholder="e.g. Alice">
-            <table>
+            <table class="responsive-table">
                 <thead>
                     <tr>
                         <th>First Name</th>
@@ -41,10 +41,10 @@
                 <tbody>
                     {% for volunteer in volunteers %}
                     <tr>
-                        <td>{{ volunteer.first_name }}</td>
-                        <td>{{ volunteer.last_name }}</td>
-                        <td>{{ volunteer.email }}</td>
-                        <td class="action-cell">
+                        <td data-label="First Name">{{ volunteer.first_name }}</td>
+                        <td data-label="Last Name">{{ volunteer.last_name }}</td>
+                        <td data-label="Email">{{ volunteer.email }}</td>
+                        <td class="action-cell" data-label="Actions">
                             <div class="action-group">
                                 <button type="button"
                                         id="remove-btn-{{ volunteer.volunteer_uuid }}"

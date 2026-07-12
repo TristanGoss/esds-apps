@@ -29,7 +29,7 @@
         </form>
         <label for="filter-description"><b>Filter by Description:</b></label>
         <input type="text" id="filter-description" placeholder="e.g. event name">
-        <table>
+        <table class="responsive-table">
             <thead>
                 <tr>
                     <th>Description</th>
@@ -42,17 +42,17 @@
             <tbody>
             {% for qr in qr_codes %}
                 <tr>
-                    <td>{{ qr.description }}</td>
-                    <td><a href="{{ qr.target_url }}" target="_blank">{{ qr.target_url }}</a></td>
-                    <td>
+                    <td data-label="Description">{{ qr.description }}</td>
+                    <td data-label="Target URL"><a href="{{ qr.target_url }}" target="_blank">{{ qr.target_url }}</a></td>
+                    <td data-label="Scans">
                         <a href="/qr-codes/{{ qr.code_id }}/scans.csv" title="Scan Times">{{ qr.scan_count }}</a>
                     </td>
-                    <td>
+                    <td data-label="Download">
                         <a href="/qr-codes/{{ qr.code_id }}/qr.svg" target="_blank">SVG</a>
                         |
                         <a href="/qr-codes/{{ qr.code_id }}/qr.png" target="_blank">PNG</a>
                     </td>
-                    <td>
+                    <td data-label="Actions">
                         <form class="inline-form" method="post">
                             <input type="hidden" name="delete_code_id" value="{{ qr.code_id }}">
                             <button type="submit" class="danger" onclick="return confirm('Delete this QR code?');">Delete</button>

@@ -21,7 +21,7 @@
         </p>
         <label for="filter-first-name">Filter by First Name:</label>
         <input type="text" id="filter-first-name" placeholder="e.g. Alice">
-        <table>
+        <table class="responsive-table">
             <thead>
                 <tr>
                     <th>Card Number</th>
@@ -34,11 +34,11 @@
             <tbody>
                 {% for check in checks %}
                 <tr>
-                    <td>{{ check.card_number }}</td>
-                    <td>{{ check.first_name }}</td>
-                    <td>{{ check.last_name }}</td>
-                    <td>{{ check.checked_by }}</td>
-                    <td>{{ check.checked_at.strftime("%d-%m-%Y %H:%M:%S") }}</td>
+                    <td data-label="Card Number">{{ check.card_number }}</td>
+                    <td data-label="First Name">{{ check.first_name }}</td>
+                    <td data-label="Last Name">{{ check.last_name }}</td>
+                    <td data-label="Checked By">{{ check.checked_by }}</td>
+                    <td data-label="Checked At">{{ check.checked_at.strftime("%d-%m-%Y %H:%M:%S") }}</td>
                 </tr>
                 {% endfor %}
             </tbody>
