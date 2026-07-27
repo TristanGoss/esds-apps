@@ -49,6 +49,7 @@
 #balance-chart { height: 400px; }
 #variance-chart { height: 320px; }
 #calendar-chart { height: 210px; }
+#split-chart { height: 240px; }
 
 /* ---- budget table ---- */
 table.budget { width: 100%; }
@@ -126,6 +127,16 @@ label.control input.invalid { border-color: #b3261e; box-shadow: 0 0 0 1px #b326
 }
 
 ul.refs li, ul.assumptions li { margin-bottom: 0.5rem; }
+
+/* ---- "Under the bonnet" collapsible section ---- */
+details.bonnet-section { margin: 1.5rem 0; }
+details.bonnet-section > summary {
+  cursor: pointer;
+  font-size: 1.5rem;
+  font-weight: 600;
+  line-height: 1.2;
+  margin: 1rem 0;
+}
 
 /* ---- generated dates table ---- */
 #calendar-table { overflow-x: auto; }

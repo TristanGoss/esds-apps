@@ -107,8 +107,9 @@
         </div>
         <div id="controls"></div>
 
-        <!-- Detailed models -->
-        <h2>Under the bonnet: assumptions, dates and attendance models</h2>
+        <!-- Detailed models (collapsible; collapsed by default) -->
+        <details id="bonnet" class="bonnet-section">
+        <summary>Look under the bonnet: assumptions, dates, models and references</summary>
         <p>
             The forecast above rests on a generated calendar and a few statistical models fitted to our
             attendance history. Every control's default is our <strong>best guess</strong>: the value drawn
@@ -178,6 +179,15 @@
         </p>
         <div id="attendance-chart" class="chart"></div>
 
+        <h3>Ticket split: member/concession vs ordinary</h3>
+        <p>
+            Not everyone pays the full price: members and concessions pay the discounted rate. This is the
+            share of tickets sold at each rate for each activity, read from the recorded ticket types (with a
+            95% range). It's what sets the <em>blended</em> price the forecast earns per head, so a higher
+            member share lowers average revenue per ticket.
+        </p>
+        <div id="split-chart" class="chart"></div>
+
         <h3>Level 2 loyalty: how many free tickets?</h3>
         <p>
             Every <span id="loyalty-every-label">8th</span> Level 2 ticket a dancer buys is refunded. Most
@@ -196,7 +206,7 @@
         <div id="variance-chart" class="chart"></div>
 
         <!-- References -->
-        <h2 id="references">References &amp; where the numbers come from</h2>
+        <h3 id="references">References &amp; where the numbers come from</h3>
         <p>The nominal (best-guess) figures are drawn from these sources:</p>
         <ul class="refs">
             <li><strong>Attendance figures</strong> (Level 1 sign-ups, Level 2 and social turnout, the
@@ -221,6 +231,7 @@
                 <a href="https://en.wikipedia.org/wiki/Unscented_transform" target="_blank"
                 rel="noopener">unscented Kalman filter</a>), which is fast enough to update as you edit.</li>
         </ul>
+        </details>
         {% endif %}
     </main>
 

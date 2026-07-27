@@ -306,6 +306,7 @@
     renderCalendar(r);
     renderL1(r);
     renderAttendance(r);
+    renderSplit(r);
     renderSurvival(r);
     renderVariance(r);
     document.getElementById('loyalty-every-label').textContent = ordinal(r.detail.loyalty_every);
@@ -539,6 +540,46 @@
     }, true);
   }
 
+  // The member/concession vs ordinary ticket split per activity, as a 100%-stacked horizontal bar.
+  const SPLIT_LABELS = {
+    'L1 discounted share': 'Level 1 classes',
+    'L2 discounted share': 'Level 2 classes',
+    'social discounted share': 'Socials',
+    'weekender discounted share': 'Weekender',
+  };
+
+  function renderSplit(r) {
+    const rows = (r.detail.inputs || [])
+      .filter(x => SPLIT_LABELS[x.name])
+      .map(x => ({ label: SPLIT_LABELS[x.name], disc: x.mean, lo: x.lo, hi: x.hi }))
+      .reverse();  // category axis puts index 0 at the bottom; reverse so Level 1 reads at the top
+    const conf = Math.round(r.confidence * 100);
+    const pct = v => Math.round(v * 100);
+    const cats = rows.map(x => x.label);
+    const disc = rows.map(x => pct(x.disc));
+    const ord = disc.map(v => 100 - v);
+    const tip = params => {
+      if (!params.length) return '';
+      const x = rows[params[0].dataIndex];
+      return `${x.label}<br>member/concession: <b>${pct(x.disc)}%</b> ` +
+        `(${conf}% range ${pct(x.lo)}–${pct(x.hi)}%)<br>ordinary: ${100 - pct(x.disc)}%`;
+    };
+    const c = chart('split-chart');
+    c.setOption({
+      grid: { left: 130, right: 24, top: 34, bottom: 34 },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, formatter: tip },
+      legend: { data: ['member/concession', 'ordinary'], top: 0 },
+      xAxis: { type: 'value', max: 100, axisLabel: { formatter: '{value}%' } },
+      yAxis: { type: 'category', data: cats },
+      series: [
+        { name: 'member/concession', type: 'bar', stack: 'split', data: disc, itemStyle: { color: '#2ca02c' },
+          label: { show: true, formatter: '{c}%', color: '#fff', fontSize: 11 } },
+        { name: 'ordinary', type: 'bar', stack: 'split', data: ord, itemStyle: { color: '#9aa0a6' },
+          label: { show: true, formatter: '{c}%', color: '#fff', fontSize: 11 } },
+      ],
+    }, true);
+  }
+
   function renderSurvival(r) {
     const s = r.detail.l2_survival;
     const every = r.detail.loyalty_every;
@@ -633,4 +674,21 @@
   const setAllSections = open => document.querySelectorAll('details.control-section').forEach(d => { d.open = open; });
   document.getElementById('expand-btn').addEventListener('click', () => setAllSections(true));
   document.getElementById('collapse-btn').addEventListener('click', () => setAllSections(false));
+
+  // The "Under the bonnet" charts are initialised while their <details> is collapsed, so ECharts can't
+  // measure them at load. Resize them the first time (and each time) the section is opened.
+  const bonnet = document.getElementById('bonnet');
+  if (bonnet) {
+    bonnet.addEventListener('toggle', () => {
+      if (bonnet.open) Object.values(charts).forEach(c => c.resize());
+    });
+    // In-page links (e.g. "see the references") may target content now inside the collapsed section;
+    // open it first so the browser can scroll to the anchor.
+    document.querySelectorAll('a[href^="#"]').forEach(a => {
+      a.addEventListener('click', () => {
+        const target = document.getElementById(a.getAttribute('href').slice(1));
+        if (target && bonnet.contains(target) && !bonnet.open) bonnet.open = true;
+      });
+    });
+  }
 })();
