@@ -11,6 +11,7 @@ CACHE_ROOT = '/tmp/esds_cache'
 BASE_URL = 'https://apps.esds.org.uk'
 QR_DB_PATH = CACHE_ROOT + '/qr_codes.db'
 ATTENDANCE_DB_PATH = Path(os.environ.get('ATTENDANCE_DB_PATH', CACHE_ROOT + '/attendance.sqlite'))
+FORECAST_DEFAULTS_PATH = Path(os.environ.get('FORECAST_DEFAULTS_PATH', CACHE_ROOT + '/forecast_defaults.csv'))
 
 SECRETS = dotenv_values('.env')
 for var_name in [

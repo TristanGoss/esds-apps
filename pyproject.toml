@@ -27,6 +27,8 @@ dependencies = [
     "rapidfuzz (>=3.14.5,<4.0.0)",
     "pandas (>=3.0.3,<4.0.0)",
     "numpy (>=2.4.0,<3.0.0)",
+    "scipy (>=1.18.0,<2.0.0)",
+    "python-dateutil (>=2.9.0.post0,<3.0.0)",
 ]
 
 [tool.poetry]

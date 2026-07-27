@@ -1,0 +1,115 @@
+/* Styles for the /forecast what-if tool. Builds on Pico + site.css. */
+
+.explainer { background: var(--pico-card-sectioning-background-color, #f6f8fa); }
+.muted { color: var(--pico-muted-color, #6b7280); }
+.error { color: var(--pico-del-color, #b3261e); }
+
+/* ---- headline result cards ---- */
+.headline-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin: 1rem 0;
+}
+.headline-card {
+  margin: 0;
+  padding: 1rem 1.1rem;
+  text-align: center;
+}
+.headline-figure {
+  font-size: clamp(1.6rem, 5vw, 2.4rem);
+  font-weight: 700;
+  line-height: 1.1;
+  margin: 0.2rem 0;
+}
+.headline-figure.good { color: #1a7f37; }
+.headline-figure.bad { color: #b3261e; }
+
+/* ---- status / spinner ---- */
+#status-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 1.6rem;
+  margin-bottom: 0.5rem;
+}
+.spinner {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 3px solid rgba(31, 119, 180, 0.3);
+  border-top-color: #1f77b4;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex: none;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- charts ---- */
+.chart { width: 100%; height: 360px; }
+#balance-chart { height: 400px; }
+#variance-chart { height: 320px; }
+
+/* ---- budget table ---- */
+table.budget { width: 100%; }
+table.budget td, table.budget th { padding: 0.35rem 0.6rem; }
+table.budget .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+table.budget tr.group th { padding-top: 0.9rem; border-bottom: 1px solid var(--pico-muted-border-color, #ccc); }
+table.budget tr.subtotal td { font-weight: 600; border-top: 1px solid var(--pico-muted-border-color, #ccc); }
+table.budget tr.net td { font-weight: 700; font-size: 1.05rem; border-top: 2px solid var(--pico-color, #333); }
+table.budget tr.net.good td { color: #1a7f37; }
+table.budget tr.net.bad td { color: #b3261e; }
+table.budget tr.net-ci td { color: var(--pico-muted-color, #6b7280); font-size: 0.85rem; padding-top: 0; }
+
+/* ---- controls ---- */
+.control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
+}
+.control-actions button { width: auto; margin: 0; }
+
+details.control-section { margin-bottom: 0.6rem; }
+details.control-section > summary { font-weight: 600; font-size: 1.05rem; padding: 0.5rem 0; }
+
+.control-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 0.75rem 1.25rem;
+  padding: 0.5rem 0 0.75rem;
+}
+label.control {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  margin: 0;
+  font-size: 0.9rem;
+}
+label.control .control-label { font-weight: 500; }
+label.control input[type="number"] { margin: 0; }
+label.control input[type="checkbox"] { margin: 0.2rem 0 0; }
+
+.info-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05em;
+  height: 1.05em;
+  border-radius: 50%;
+  background: var(--pico-muted-border-color, #ccd);
+  color: var(--pico-contrast, #222);
+  font-size: 0.72em;
+  font-weight: 700;
+  cursor: help;
+  vertical-align: middle;
+}
+
+ul.refs li { margin-bottom: 0.4rem; }
+
+/* ---- mobile ---- */
+@media (max-width: 640px) {
+  .headline-grid { grid-template-columns: 1fr; gap: 0.6rem; }
+  .control-grid { grid-template-columns: 1fr; }
+  .chart { height: 300px; }
+  #balance-chart { height: 320px; }
+}

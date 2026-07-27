@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>Forecast</title>
+    <link rel="icon" href="/public/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="/public/css/site.css">
+    <link rel="stylesheet" href="/public/css/forecast.css">
+    <!-- ECharts does all the rendering client-side. Pinned major version, matching /attendance. -->
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js"></script>
+</head>
+
+<body>
+    {% include "membership_navbar.html" %}
+    <main class="container">
+        <h1>Budget forecast &mdash; a "what if?" tool</h1>
+
+        {% if unavailable %}
+        <article>
+            <p class="error">The forecast isn't set up on this server yet: its data file is missing.
+            It needs both the attendance database and the (private) defaults spreadsheet.</p>
+        </article>
+        {% else %}
+
+        <p>
+            This tool forecasts the society's budget for a whole academic year and lets you explore
+            <strong>"what if?"</strong> questions &mdash; change a price, a pay rate, how many volunteers we
+            have, whether we run a weekender, and watch the projected finances respond. It is a production
+            port of the forecasting notebook the committee has been building; every default below is drawn
+            from our real records, and the reasoning behind each number is in the
+            <a href="#references">references</a> at the bottom.
+        </p>
+
+        <article class="explainer">
+            <header><strong>Reading the uncertainty</strong></header>
+            <p>
+                Attendance and some costs can't be known exactly in advance, so most figures here are given
+                as a best estimate <em>plus a range</em> rather than a single number. That range is a
+                <strong>confidence interval</strong>: with the confidence set to 95% (the default), it's the
+                band the true figure will fall inside about 95 times out of 100 if our assumptions hold. A
+                wider band means more uncertainty. You can change the confidence level in the
+                <em>Analysis</em> controls.
+                (<a href="https://en.wikipedia.org/wiki/Confidence_interval" target="_blank" rel="noopener">what
+                is a confidence interval?</a>)
+            </p>
+            <p>
+                The ranges are worked out with a technique called the <strong>unscented transform</strong>,
+                which is fast enough to update as you type &mdash; see the
+                <a href="#references">references</a>. The <em>probability of a surplus</em> is the chance the
+                year finishes in the black rather than at a loss.
+            </p>
+        </article>
+
+        <!-- Headline result -->
+        <section id="headline" class="headline-grid" aria-live="polite">
+            <article class="headline-card">
+                <small>Year result</small>
+                <div class="headline-figure" id="hl-net">&mdash;</div>
+                <small id="hl-net-ci" class="muted"></small>
+            </article>
+            <article class="headline-card">
+                <small>Projected balance next summer</small>
+                <div class="headline-figure" id="hl-balance">&mdash;</div>
+                <small id="hl-balance-ci" class="muted"></small>
+            </article>
+            <article class="headline-card">
+                <small>Probability of a surplus</small>
+                <div class="headline-figure" id="hl-pgreen">&mdash;</div>
+                <small class="muted">chance the year ends in the black</small>
+            </article>
+        </section>
+
+        <div id="status-bar">
+            <span id="spinner" class="spinner" hidden aria-label="Updating forecast"></span>
+            <span id="status-text" class="muted"></span>
+        </div>
+
+        <!-- Budget + spend graph -->
+        <h2>Budget breakdown</h2>
+        <p>
+            Where the money comes from and where it goes over the year. Income and costs are point
+            estimates at the settings below; the <em>year result</em> at the top carries the confidence
+            range because it depends on uncertain attendance.
+        </p>
+        <div id="budget-table"></div>
+
+        <h2>Money in the bank through the year</h2>
+        <p>
+            The projected current-account balance from today's opening balance to next summer. The shaded
+            band is the confidence interval &mdash; the balance is likely to stay inside it. The dotted line
+            marks the opening balance, so you can see at a glance whether the year adds to or draws down the
+            reserves.
+        </p>
+        <div id="balance-chart" class="chart"></div>
+
+        <!-- Control panel -->
+        <h2>Controls</h2>
+        <p>
+            Change any value to update the forecast. Each control has an <span class="info-dot"
+            title="hover the ? on any control to see where its default came from">?</span> explaining where
+            its default came from. Values update after a short pause so the server isn't flooded while you
+            adjust several at once. Use <strong>Reset to forecast</strong> to return every control to its
+            data-driven default.
+        </p>
+        <div class="control-actions">
+            <button id="reset-btn" class="secondary outline" type="button">Reset to forecast</button>
+            <button id="download-btn" class="outline" type="button">Download scenario (.xlsx)</button>
+        </div>
+        <div id="controls"></div>
+
+        <!-- Detailed models -->
+        <h2>Under the bonnet: the attendance models</h2>
+        <p>
+            The forecast above rests on a few statistical models fitted to our attendance history. They are
+            shown here for scrutiny; you don't need them to use the tool.
+        </p>
+
+        <h3>Level 1 sign-ups per term</h3>
+        <p>
+            How many people we expect to sign up for beginners' classes each term, with a confidence range.
+            Sign-ups have been declining year on year and are largest in the autumn and January terms; the
+            model captures both. Grey dots are the actual past terms it was fitted to.
+        </p>
+        <div id="l1-chart" class="chart"></div>
+
+        <h3>Level 2 loyalty: how many free tickets?</h3>
+        <p>
+            Every <span id="loyalty-every-label">8th</span> Level 2 ticket a dancer buys is refunded. Most
+            dancers come only a few nights, so the refunds come from the regulars. This
+            <strong>survival curve</strong> shows the share of dancers attending at least a given number of
+            nights; the refund count is read off where the loyalty threshold falls. The dashed line is the
+            fitted model, the dots the real data.
+        </p>
+        <div id="survival-chart" class="chart"></div>
+
+        <h3>Where the uncertainty comes from</h3>
+        <p>
+            Not every unknown matters equally. This ranks how much each uncertain input contributes to the
+            spread in the year result, so it's clear which number would be most worth pinning down.
+        </p>
+        <div id="variance-chart" class="chart"></div>
+
+        <!-- References -->
+        <h2 id="references">References &amp; where the numbers come from</h2>
+        <p>The nominal (default) figures are drawn from these sources:</p>
+        <ul class="refs">
+            <li><strong>Attendance figures</strong> (Level 1 sign-ups, Level 2 and social turnout, the
+                weekender's repeat audience, loyalty refunds) are fitted from the society's own attendance
+                database &mdash; the same records behind the <a href="/attendance">Attendance</a> page.</li>
+            <li><strong>Band fee</strong> is a distribution fitted to eight real band payments from the
+                2023&ndash;25 bank statements (mean about &pound;672), each uprated for inflation.</li>
+            <li><strong>Membership</strong> is the mean of the paid-member counts for 2024&ndash;26; its
+                year-to-year spread sets its uncertainty.</li>
+            <li><strong>Prices, pay rates, room hours, the opening bank balance and overheads</strong> are
+                the committee's current real figures, held in a private spreadsheet off GitHub.</li>
+            <li><strong>Inflation</strong> uses the ONS Consumer Prices Index, 12-month rate
+                (<a href="https://www.ons.gov.uk/economy/inflationandpriceindices/timeseries/d7g7/mm23"
+                target="_blank" rel="noopener">series D7G7</a>).</li>
+            <li><strong>Ticketing fees</strong>: Dancecloud 2.5% + 50p per ticket (capped &pound;5), and
+                Stripe 1.5% + 20p charged separately on the daily transfer to our bank.</li>
+            <li><strong>The unscented transform</strong> (used to produce the confidence ranges cheaply) is
+                the sigma-point method at the heart of the
+                <a href="https://en.wikipedia.org/wiki/Unscented_transform" target="_blank"
+                rel="noopener">unscented Kalman filter</a>.</li>
+        </ul>
+        <p class="muted">
+            The forecasting notebook remains the design surface and the fuller write-up; this page is a
+            faithful port of it for interactive use.
+        </p>
+        {% endif %}
+    </main>
+
+    {% if not unavailable %}
+    <script id="forecast-defaults" type="application/json">{{ defaults | tojson }}</script>
+    <script id="forecast-initial" type="application/json">{{ initial | tojson }}</script>
+    <script src="/public/js/forecast.js"></script>
+    {% endif %}
+</body>
+
+</html>

@@ -22,7 +22,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from esds_apps import config
+from esds_apps import config, forecast
 from esds_apps.attendance import analysis
 from esds_apps.auth import build_login_redirect, handle_oauth_callback, login_required, require_valid_cookie
 from esds_apps.classes import MembershipCardStatus, PrintablePdfError
@@ -286,6 +286,63 @@ async def attendance_community_term_dancers(
     return JSONResponse(
         {'term_start': term_start, 'scope': scope, 'min_activities': min_activities, 'dancers': dancers},
         headers=_NO_STORE,
+    )
+
+
+@app.get('/forecast', response_class=HTMLResponse)
+@login_required
+async def forecast_page(request: Request):
+    """The interactive budget/attendance forecast ("what if?") tool.
+
+    Renders with the forecast defaults and a first prediction already computed, so the page shows
+    numbers immediately; the browser only re-predicts when the operator changes a control.
+    """
+    try:
+        ctx = forecast.get_context()
+        initial = forecast.predict()
+        defaults = forecast.default_params(ctx)
+    except FileNotFoundError as e:
+        log.warning('Forecast unavailable, missing %s', e)
+        return config.TEMPLATES.TemplateResponse(
+            request, 'forecast.html', {'unavailable': True, 'defaults': {}, 'initial': {}}
+        )
+    return config.TEMPLATES.TemplateResponse(
+        request, 'forecast.html', {'unavailable': False, 'defaults': defaults, 'initial': initial}
+    )
+
+
+@app.post('/forecast/predict.json')
+async def forecast_predict(request: Request, _: None = Depends(require_valid_cookie)):
+    """Re-run the forecast for the operator's current control values and return the updated result.
+
+    Guarded by the cookie dependency (not the redirecting login_required) so an expired session gets a
+    clean 401 the frontend can surface, rather than a 302 into Google's OAuth flow.
+    """
+    body = await request.json()
+    try:
+        result = forecast.predict(body.get('params') or {}, body.get('confidence'))
+    except FileNotFoundError:
+        return JSONResponse(
+            {'error': 'The forecast data has not been set up yet.'}, status_code=HTTPStatus.SERVICE_UNAVAILABLE
+        )
+    return JSONResponse(result)
+
+
+@app.post('/forecast/download.xlsx')
+async def forecast_download(request: Request, _: None = Depends(require_valid_cookie)):
+    """Download the current what-if scenario (inputs + results) as a timestamped workbook."""
+    body = await request.json()
+    try:
+        content = forecast.to_workbook(body.get('params') or {}, body.get('confidence'))
+    except FileNotFoundError:
+        return JSONResponse(
+            {'error': 'The forecast data has not been set up yet.'}, status_code=HTTPStatus.SERVICE_UNAVAILABLE
+        )
+    stamp = datetime.now(pytz.timezone('Europe/London')).strftime('%Y%m%d_%H%M%S')
+    return Response(
+        content=content,
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        headers={'Content-Disposition': f'attachment; filename=esds_forecast_{stamp}.xlsx'},
     )
 
 
