@@ -37,6 +37,7 @@ DEFAULTS = {
     'price_wk_full_ord': 120,
     'price_wk_day_disc': 40,
     'price_wk_day_ord': 45,
+    'price_wk_social': 40,
     'membership_fee': 12,
     'room_per_hour': 35,
     'class_room_hour_a': 2.75,
@@ -66,6 +67,7 @@ DEFAULTS = {
     'gsuite_seat_monthly': 5.9,
     'wix_reseller_annual': 157.44,
     'volunteer_social_per_head': 35,
+    'n_volunteer_socials': 2,
     'oh_website': 129.6,
     'oh_email_marketing': 237.6,
     'oh_insurance': 109.6,
@@ -102,7 +104,15 @@ def make_context():
         soc_vals=[68.0, 70.0, 66.0, 72.0, 64.0, 69.0, 71.0],
         xmas_vals=[68.0, 136.0],
         social_only_vals=[5.0, 4.0, 6.0, 5.0],
-        wk_mix={'reference': 'Ref', 'attendees_ref': 195, 'retained': 87, 'full': 31, 'partial': 17, 'single': 39},
+        wk_mix={
+            'reference': 'Ref',
+            'attendees_ref': 195,
+            'retained': 87,
+            'full': 31,
+            'partial': 17,
+            'social': 24,
+            'single': 15,
+        },
         fractions={'l1': 0.34, 'l2': 0.68, 'soc': 0.41, 'wk': 0.5},
         frac_n={'l1': 1000, 'l2': 800, 'soc': 300, 'wk': 195},
         loyalty_family='weibull',
@@ -216,6 +226,32 @@ def test_class_size_cap_limits_signups(ctx):
     assert capped < base  # capping paying sign-ups reduces class income
 
 
+def test_weekender_social_pass_priced(ctx):
+    """The social-pass share of the weekender audience earns revenue at its flat price."""
+    base = forecast.predict()['net']['mean']
+    dearer = forecast.predict({'price_wk_social': 200})['net']['mean']
+    assert dearer > base  # more social-pass income lifts the year
+    off = forecast.predict({'have_weekender': False})
+    assert 'Weekender tickets' not in [b['category'] for b in off['budget']]
+
+
+def test_volunteer_socials_count_scales_cost(ctx):
+    """The number of volunteer socials is a control; doubling it doubles that cost line."""
+    two = forecast.predict({'n_volunteer_socials': 2})
+    four = forecast.predict({'n_volunteer_socials': 4})
+    c2 = [b['amount'] for b in two['budget'] if b['category'] == 'Volunteer socials'][0]
+    c4 = [b['amount'] for b in four['budget'] if b['category'] == 'Volunteer socials'][0]
+    assert c4 == 2 * c2
+    none = forecast.predict({'n_volunteer_socials': 0})
+    assert 'Volunteer socials' not in [b['category'] for b in none['budget']]
+
+
+def test_calendar_dates_exposed(ctx):
+    cal = forecast.predict()['calendar']
+    assert cal['first_class'] and len(cal['terms']) == 6
+    assert {'Christmas party', 'End-of-year party'} <= {s['label'] for s in cal['socials']}
+
+
 # ---------------------------------------------------------------- defaults CSV loading
 def test_coerce_infers_types():
     assert forecast._coerce('') is None
@@ -244,8 +280,11 @@ def test_to_workbook_is_valid_xlsx(ctx):
     content = forecast.to_workbook({'teacher_rate': 20}, 0.9)
     wb = openpyxl.load_workbook(io.BytesIO(content))
     assert {'summary', 'budget', 'parameters', 'balance'} <= set(wb.sheetnames)
-    params = {row[0]: row[1] for row in wb['parameters'].iter_rows(min_row=2, values_only=True)}
+    # The parameters sheet lists a readable label, the value, then the raw key (row = [label, value, key]).
+    params = {row[2]: row[1] for row in wb['parameters'].iter_rows(min_row=2, values_only=True)}
+    labels = {row[0] for row in wb['parameters'].iter_rows(min_row=2, values_only=True)}
     assert params['teacher_rate'] == 20
+    assert 'Teacher pay per hour' in labels
 
 
 # ---------------------------------------------------------------- routes

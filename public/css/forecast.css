@@ -48,6 +48,7 @@
 .chart { width: 100%; height: 360px; }
 #balance-chart { height: 400px; }
 #variance-chart { height: 320px; }
+#calendar-chart { height: 210px; }
 
 /* ---- budget table ---- */
 table.budget { width: 100%; }
@@ -72,11 +73,28 @@ table.budget tr.net-ci td { color: var(--pico-muted-color, #6b7280); font-size: 
 details.control-section { margin-bottom: 0.6rem; }
 details.control-section > summary { font-weight: 600; font-size: 1.05rem; padding: 0.5rem 0; }
 
+/* Per-section toolbar (reset + spinner) directly under the section heading. */
+.section-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 1.5rem;
+  margin: 0.1rem 0 0.4rem;
+}
+.section-toolbar .section-reset {
+  width: auto;
+  margin: 0;
+  padding: 0.12rem 0.6rem;
+  font-size: 0.78rem;
+}
+.section-status { font-size: 0.8rem; }
+
 .control-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 0.75rem 1.25rem;
   padding: 0.5rem 0 0.75rem;
+  align-items: stretch;
 }
 label.control {
   display: flex;
@@ -86,8 +104,11 @@ label.control {
   font-size: 0.9rem;
 }
 label.control .control-label { font-weight: 500; }
-label.control input[type="number"] { margin: 0; }
-label.control input[type="checkbox"] { margin: 0.2rem 0 0; }
+/* Push every input to the bottom of its cell so that, when a label wraps to two lines on a wide window,
+   the boxes in a row still line up instead of stair-stepping. */
+label.control input[type="number"] { margin: auto 0 0; }
+label.control input[type="checkbox"] { margin: auto 0 0; }
+label.control input.invalid { border-color: #b3261e; box-shadow: 0 0 0 1px #b3261e; }
 
 .info-dot {
   display: inline-flex;
@@ -104,7 +125,13 @@ label.control input[type="checkbox"] { margin: 0.2rem 0 0; }
   vertical-align: middle;
 }
 
-ul.refs li { margin-bottom: 0.4rem; }
+ul.refs li, ul.assumptions li { margin-bottom: 0.5rem; }
+
+/* ---- generated dates table ---- */
+#calendar-table { overflow-x: auto; }
+table.calendar { width: 100%; }
+table.calendar th { text-align: left; }
+table.calendar .group th { padding-top: 0.8rem; }
 
 /* ---- mobile ---- */
 @media (max-width: 640px) {

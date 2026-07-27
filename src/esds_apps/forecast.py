@@ -86,6 +86,80 @@ OVERHEAD_KEYS = [
 ]
 
 
+# Readable names for the parameters, mirroring the website controls, used in the .xlsx export.
+PARAM_LABELS = {
+    'forecast_ay': 'Academic year start',
+    'n_tea_dances': 'Number of tea dances',
+    'have_weekender': 'Run a weekender',
+    'loyalty_enabled': 'Level 2 loyalty scheme',
+    'loyalty_every': 'Refund every Nth ticket',
+    'class_size_cap': 'Thursday night single class size cap',
+    'l1_per_night': 'Sell Level 1 night-by-night',
+    'confidence': 'Confidence level',
+    'price_class_disc': 'Class price, member/concession',
+    'price_class_ord': 'Class price, ordinary',
+    'price_social_disc': 'Social price, member/concession',
+    'price_social_ord': 'Social price, ordinary',
+    'price_social_only_disc': 'Social-only price, member/concession',
+    'price_social_only_ord': 'Social-only price, ordinary',
+    'price_wk_full_disc': 'Weekender full pass, member/concession',
+    'price_wk_full_ord': 'Weekender full pass, ordinary',
+    'price_wk_day_disc': 'Weekender day pass, member/concession',
+    'price_wk_day_ord': 'Weekender day pass, ordinary',
+    'price_wk_social': 'Weekender social pass (evenings only)',
+    'membership_fee': 'Membership fee',
+    'room_per_hour': 'Room hire per hour',
+    'class_room_hour_a': 'Main room hours',
+    'class_room_hour_b': 'Second room hours',
+    'teacher_rate': 'Teacher pay per hour',
+    'teacher_hours_a': 'Teacher 1 hours',
+    'teacher_hours_b': 'Teacher 2 hours',
+    'teacher_hours_c': 'Teacher 3 hours',
+    'teacher_hours_d': 'Teacher 4 hours',
+    'social_snacks': 'Snacks per event',
+    'social_room_hours': 'Room hours per social',
+    'band_cost_mean': 'Typical band fee (mean)',
+    'band_cost_std': 'Band fee standard deviation',
+    'weekender_bands': 'Weekender: number of bands',
+    'weekender_room_hours': 'Weekender: total room hours',
+    'weekender_teachers': 'Weekender: number of teachers',
+    'weekender_teacher_rate': 'Weekender: teacher pay per hour',
+    'weekender_teacher_hours': 'Weekender: teacher hours each',
+    'weekender_flight': 'Weekender: travel per teacher',
+    'weekender_board_per_night': 'Weekender: board per teacher per night',
+    'weekender_nights': 'Weekender: nights of board',
+    'n_committee': 'Committee members',
+    'n_safer_spaces': 'Safer-spaces team',
+    'n_extra_volunteers': 'Other volunteers',
+    'n_legacy_accounts': 'Legacy Workspace seats',
+    'n_shared_accounts': 'Devices Workspace seats',
+    'gsuite_seat_monthly': 'Workspace seat / month',
+    'wix_reseller_annual': 'Wix reseller / year',
+    'volunteer_social_per_head': 'Volunteer social per head',
+    'n_volunteer_socials': 'Number of volunteer socials',
+    'n_members': 'Members (mean)',
+    'membership_std': 'Members standard deviation',
+    'current_balance': 'Opening bank balance',
+    'oh_website': 'Overhead: website',
+    'oh_email_marketing': 'Overhead: email marketing',
+    'oh_insurance': 'Overhead: insurance',
+    'oh_storage_container': 'Overhead: storage',
+    'oh_spotify': 'Overhead: Spotify',
+    'oh_survey_monkey': 'Overhead: SurveyMonkey',
+    'oh_pat_testing': 'Overhead: PAT testing',
+    'oh_equipment_recap': 'Overhead: equipment',
+    'oh_society_phone': 'Overhead: society phone',
+    'oh_posters': 'Overhead: posters',
+    'oh_stationery': 'Overhead: stationery',
+    'oh_canva': 'Overhead: Canva',
+    'dc_rate': 'Dancecloud fee rate',
+    'dc_fixed': 'Dancecloud fee, fixed per ticket',
+    'dc_cap': 'Dancecloud fee cap',
+    'stripe_rate': 'Stripe fee rate',
+    'stripe_fixed': 'Stripe fee, fixed per day',
+}
+
+
 # --------------------------------------------------------------------------------------------------
 # Calendar (deterministic given the forecast year and the two social-count knobs)
 # --------------------------------------------------------------------------------------------------
@@ -451,25 +525,32 @@ def _build_context() -> ForecastContext:  # noqa: PLR0915  (a single sweep of th
                 (wk_last,),
             )
         }
-        ns = [
-            n
-            for (_, n) in conn.execute(
-                'SELECT at.dancer_id, COUNT(DISTINCT a.activity_id) FROM attendance at '
-                'JOIN activity a USING(activity_id) '
-                "WHERE a.event_id = ? AND at.status IN ('attended','unknown') GROUP BY at.dancer_id",
-                (wk_eid,),
-            )
-        ]
-        mx, tot = max(ns), len(ns)
+        # Classify each reference-weekender attendee by how many lessons vs socials they went to, so we
+        # can separate the four ticket kinds: full pass (lessons on 2+ days), day pass (one day of
+        # lessons), social pass (socials only, no lessons), and a single-social walk-in.
+        mix_rows = conn.execute(
+            "SELECT SUM(CASE WHEN a.activity_type='lesson' THEN 1 ELSE 0 END), "
+            "SUM(CASE WHEN a.activity_type='social' THEN 1 ELSE 0 END) "
+            'FROM attendance at JOIN activity a USING(activity_id) '
+            "WHERE a.event_id = ? AND at.status IN ('attended','unknown') GROUP BY at.dancer_id",
+            (wk_eid,),
+        ).fetchall()
+        tot = len(mix_rows)
         rr = len(att_ref & after)
+        scale = rr / tot if tot else 0.0
+        n_full = sum(1 for les, _soc in mix_rows if les >= 2)  # noqa: PLR2004
+        n_partial = sum(1 for les, _soc in mix_rows if les == 1)
+        n_social = sum(1 for les, soc in mix_rows if les == 0 and soc >= 2)  # noqa: PLR2004
+        n_single = sum(1 for les, soc in mix_rows if les == 0 and soc == 1)
         wk_mix = {
             'reference': wk_name,
             'attendees_ref': tot,
             'retained': rr,
-            'full': round(rr * sum(n >= mx - 1 for n in ns) / tot),
-            'single': round(rr * sum(n == 1 for n in ns) / tot),
+            'full': round(scale * n_full),
+            'partial': round(scale * n_partial),
+            'social': round(scale * n_social),
+            'single': round(scale * n_single),
         }
-        wk_mix['partial'] = rr - wk_mix['full'] - wk_mix['single']
 
         # ---- Level 2 loyalty survival: family chosen on the smooth all-activity curve, refit to L2 ----
         all_nights = [
@@ -658,9 +739,11 @@ def run_scenario(ctx: ForecastContext, p: dict, cal: dict, socials: list, x: np.
             if p['loyalty_enabled']:
                 add(thu, 'Loyalty refunds', 'cost', cost=loyalty_per_thu, is_loyalty=True)
 
-    wk_full = wk_ret * ctx.wk_mix['full'] / ctx.wk_mix['retained']
-    wk_partial = wk_ret * ctx.wk_mix['partial'] / ctx.wk_mix['retained']
-    wk_single = wk_ret * ctx.wk_mix['single'] / ctx.wk_mix['retained']
+    retained = ctx.wk_mix['retained'] or 1
+    wk_full = wk_ret * ctx.wk_mix['full'] / retained
+    wk_partial = wk_ret * ctx.wk_mix['partial'] / retained
+    wk_single = wk_ret * ctx.wk_mix['single'] / retained
+    wk_social = wk_ret * ctx.wk_mix['social'] / retained
     for label, dt in socials:
         if label == 'Weekender':
             for n, pd_, po in [
@@ -670,6 +753,16 @@ def run_scenario(ctx: ForecastContext, p: dict, cal: dict, socials: list, x: np.
             ]:
                 price = _blended(pd_, po, fwk)
                 add(dt, 'Weekender tickets', 'revenue', gross=n * price, n_txn=round(n), ticket_amt=price)
+            # Social pass: evenings only, no classes; a single flat weekend price (not disc/ord blended).
+            sp_price = p['price_wk_social']
+            add(
+                dt,
+                'Weekender tickets',
+                'revenue',
+                gross=wk_social * sp_price,
+                n_txn=round(wk_social),
+                ticket_amt=sp_price,
+            )
             add(dt, 'Weekender costs', 'cost', cost=p['weekender_bands'] * band_cost)
             add(dt, 'Weekender costs', 'cost', cost=p['weekender_bands'] * p['social_snacks'])
             add(dt, 'Weekender costs', 'cost', cost=p['weekender_room_hours'] * p['room_per_hour'])
@@ -695,8 +788,11 @@ def run_scenario(ctx: ForecastContext, p: dict, cal: dict, socials: list, x: np.
             add(dt, 'Social costs', 'cost', cost=p['social_room_hours'] * p['room_per_hour'])
 
     vol_heads = p['n_committee'] + p['n_safer_spaces'] + p['n_extra_volunteers']
-    for party in (cal['xmas_party'], cal['eoy_party']):
-        add(party - timedelta(days=7), 'Volunteer socials', 'cost', cost=vol_heads * p['volunteer_social_per_head'])
+    n_vol_socials = int(p.get('n_volunteer_socials', 2))
+    start, eoy = cal['first_class'], cal['eoy_party']
+    for i in range(n_vol_socials):
+        dt = start + (eoy - start) * (i + 1) // (n_vol_socials + 1)
+        add(dt, 'Volunteer socials', 'cost', cost=vol_heads * p['volunteer_social_per_head'])
 
     n_seats = p['n_committee'] + p['n_safer_spaces'] + p['n_legacy_accounts'] + p['n_shared_accounts']
     overheads = {k: p['oh_' + k] for k in OVERHEAD_KEYS}
@@ -885,6 +981,10 @@ def _merge_params(ctx: ForecastContext, overrides: dict) -> dict:
         'n_extra_volunteers',
         'n_legacy_accounts',
         'n_shared_accounts',
+        'n_volunteer_socials',
+        'weekender_bands',
+        'weekender_teachers',
+        'weekender_nights',
     }
     for k, v in (overrides or {}).items():
         if k not in p or v is None:
@@ -954,6 +1054,7 @@ def predict(overrides: dict | None = None, confidence: float | None = None) -> d
         'calendar': {
             'ay': cal['ay'],
             'n_class_nights': sum(t['weeks'] for t in cal['terms']),
+            'first_class': cal['first_class'].isoformat(),
             'socials': [{'label': lbl, 'date': dt.isoformat()} for lbl, dt in socials],
             'terms': [
                 {'term': t['term'], 'start': t['start'].isoformat(), 'end': t['end'].isoformat(), 'weeks': t['weeks']}
@@ -1010,9 +1111,9 @@ def to_workbook(overrides: dict | None, confidence: float | None) -> bytes:
         budget.append([line['category'], line['kind'], line['amount']])
 
     params = wb.create_sheet('parameters')
-    params.append(['parameter', 'value'])
-    for k in sorted(p):
-        params.append([k, p[k]])
+    params.append(['parameter', 'value', 'key'])
+    for k in sorted(p, key=lambda kk: PARAM_LABELS.get(kk, kk).lower()):
+        params.append([PARAM_LABELS.get(k, k), p[k], k])
 
     bal = wb.create_sheet('balance')
     bal.append(['date', 'mean', 'low', 'high'])

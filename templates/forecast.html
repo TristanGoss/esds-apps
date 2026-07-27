@@ -2,7 +2,7 @@
 <html lang="en">
 
 <head>
-    <title>Forecast</title>
+    <title>Budget Forecast</title>
     <link rel="icon" href="/public/favicon.ico">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
@@ -15,7 +15,7 @@
 <body>
     {% include "membership_navbar.html" %}
     <main class="container">
-        <h1>Budget forecast &mdash; a "what if?" tool</h1>
+        <h1>Budget forecast: a "what if?" tool</h1>
 
         {% if unavailable %}
         <article>
@@ -26,32 +26,11 @@
 
         <p>
             This tool forecasts the society's budget for a whole academic year and lets you explore
-            <strong>"what if?"</strong> questions &mdash; change a price, a pay rate, how many volunteers we
-            have, whether we run a weekender, and watch the projected finances respond. It is a production
-            port of the forecasting notebook the committee has been building; every default below is drawn
-            from our real records, and the reasoning behind each number is in the
+            <strong>"what if?"</strong> questions: change a price, a pay rate, how many volunteers we have,
+            whether we run a weekender, and watch the projected finances respond. Every default below is
+            drawn from our real records; the reasoning behind each number is in the
             <a href="#references">references</a> at the bottom.
         </p>
-
-        <article class="explainer">
-            <header><strong>Reading the uncertainty</strong></header>
-            <p>
-                Attendance and some costs can't be known exactly in advance, so most figures here are given
-                as a best estimate <em>plus a range</em> rather than a single number. That range is a
-                <strong>confidence interval</strong>: with the confidence set to 95% (the default), it's the
-                band the true figure will fall inside about 95 times out of 100 if our assumptions hold. A
-                wider band means more uncertainty. You can change the confidence level in the
-                <em>Analysis</em> controls.
-                (<a href="https://en.wikipedia.org/wiki/Confidence_interval" target="_blank" rel="noopener">what
-                is a confidence interval?</a>)
-            </p>
-            <p>
-                The ranges are worked out with a technique called the <strong>unscented transform</strong>,
-                which is fast enough to update as you type &mdash; see the
-                <a href="#references">references</a>. The <em>probability of a surplus</em> is the chance the
-                year finishes in the black rather than at a loss.
-            </p>
-        </article>
 
         <!-- Headline result -->
         <section id="headline" class="headline-grid" aria-live="polite">
@@ -82,40 +61,103 @@
         <p>
             Where the money comes from and where it goes over the year. Income and costs are point
             estimates at the settings below; the <em>year result</em> at the top carries the confidence
-            range because it depends on uncertain attendance.
+            range, because it depends on uncertain attendance.
         </p>
         <div id="budget-table"></div>
 
         <h2>Money in the bank through the year</h2>
         <p>
             The projected current-account balance from today's opening balance to next summer. The shaded
-            band is the confidence interval &mdash; the balance is likely to stay inside it. The dotted line
-            marks the opening balance, so you can see at a glance whether the year adds to or draws down the
-            reserves.
+            band is the confidence range: the balance is likely to stay inside it. The dotted line marks the
+            opening balance, so you can see at a glance whether the year adds to or draws down the reserves.
         </p>
         <div id="balance-chart" class="chart"></div>
+
+        <h3>How to read the ranges</h3>
+        <p>
+            The shaded band around the line above is a <strong>confidence interval</strong>. Attendance and
+            some costs can't be known exactly in advance, so the balance is drawn as a best estimate
+            <em>plus a spread</em> rather than a single line: with the confidence set to 95% (the default,
+            adjustable in the <em>Analysis</em> controls), the true balance should stay inside the band about
+            95 times out of 100 if our assumptions hold. A wider band means more uncertainty. The same shaded
+            ranges appear on the charts further down (Level 1 sign-ups) and on the year result at the top.
+            The <em>probability of a surplus</em> is the chance the year finishes in the black rather than at
+            a loss.
+            (<a href="https://en.wikipedia.org/wiki/Confidence_interval" target="_blank" rel="noopener">what
+            is a confidence interval?</a>)
+        </p>
 
         <!-- Control panel -->
         <h2>Controls</h2>
         <p>
-            Change any value to update the forecast. Each control has an <span class="info-dot"
+            The controls are grouped into themed sections: classes, socials, the weekender, volunteers and so
+            on. <strong>Click a section heading to expand or collapse it</strong>, then change any value to
+            update the forecast. Each control has an <span class="info-dot"
             title="hover the ? on any control to see where its default came from">?</span> explaining where
-            its default came from. Values update after a short pause so the server isn't flooded while you
-            adjust several at once. Use <strong>Reset to forecast</strong> to return every control to its
-            data-driven default.
+            its default came from. Values update after a short pause, so the server isn't flooded while you
+            adjust several at once. Each section has its own <strong>Reset section to best guess</strong>
+            button; <strong>Reset to best guess</strong> below returns every control to its data-driven
+            default.
         </p>
         <div class="control-actions">
-            <button id="reset-btn" class="secondary outline" type="button">Reset to forecast</button>
+            <button id="expand-btn" class="secondary outline" type="button">Expand all</button>
+            <button id="collapse-btn" class="secondary outline" type="button">Collapse all</button>
+            <button id="reset-btn" class="secondary outline" type="button">Reset to best guess</button>
             <button id="download-btn" class="outline" type="button">Download scenario (.xlsx)</button>
         </div>
         <div id="controls"></div>
 
         <!-- Detailed models -->
-        <h2>Under the bonnet: the attendance models</h2>
+        <h2>Under the bonnet: assumptions, dates and attendance models</h2>
         <p>
-            The forecast above rests on a few statistical models fitted to our attendance history. They are
-            shown here for scrutiny; you don't need them to use the tool.
+            The forecast above rests on a generated calendar and a few statistical models fitted to our
+            attendance history. Every control's default is our <strong>best guess</strong>: the value drawn
+            from our own records (attendance, past prices, real band and bank figures) that we think most
+            likely, so "reset to best guess" returns the whole tool to that data-driven starting point. The
+            assumptions and models here are shown for scrutiny; you don't need them to use the tool.
         </p>
+
+        <h3 id="assumptions">Key assumptions</h3>
+        <p>The forecast is only as good as the assumptions behind it. The main ones:</p>
+        <ul class="assumptions">
+            <li><strong>Price does not change attendance.</strong> The model holds turnout fixed when you
+                change a price, so raising a price raises income proportionally. In reality a big rise would
+                put some people off; treat large price changes as an upper bound on the gain.</li>
+            <li><strong>Attendance follows the recent past.</strong> Level 1 sign-ups, Level 2, social and
+                weekender turnout are projected from the last few years' records. A step change in the
+                scene (a surge of new dancers, a rival class opening) is not anticipated.</li>
+            <li><strong>The calendar follows our usual rules</strong> (six terms of 5&ndash;7 weeks around
+                the two fixed parties, socials spread evenly). The generated dates are shown below.</li>
+            <li><strong>Costs are the current real figures</strong> and stay flat across the year except
+                where a figure is explicitly inflation-adjusted. No mid-year price rises from venues or
+                suppliers are assumed.</li>
+            <li><strong>Level 1 and Level 2 are paid for differently.</strong> Level 1 beginners buy a whole
+                term up front (unless you switch on night-by-night selling, which then applies the term's
+                attendance drop-off). Level 2 is <em>not</em> a term block: it is sold per night, so its
+                income tracks how many dancers turn up each Thursday, modelled from the per-night attendance
+                history. Level 2 loyalty refunds follow a fitted attendance survival curve, not a flat share
+                of revenue, because most dancers come only a few nights.</li>
+            <li><strong>The weekender audience is last time's, minus the one-off crowd.</strong> The 30th
+                anniversary weekender drew 195 attendees; the recurring audience is taken as the ~45% who
+                kept coming to events afterwards (~87 people), not the whole one-off crowd. That audience is
+                split into full-pass / day-pass / social-pass / single-social buyers by what each dancer
+                actually did at the 30th (classes vs evenings attended), then scaled to the audience size you
+                set. The evenings-only <em>social pass</em> is a real ticket the 30th made plain, where the
+                socials drew far more people than the daytime classes.</li>
+        </ul>
+
+        <h3>Generated term and event dates</h3>
+        <p>
+            The calendar is worked out from fixed rules rather than typed in, so it moves correctly with the
+            forecast year. The autumn term starts on the <em>second Thursday of September</em>; the Christmas
+            party is the last class Thursday before Christmas and the end-of-year party the last Thursday of
+            June; the Thursdays in between are cut into six terms of five to seven weeks, as even as
+            possible, skipping Easter week. Tea dances (and the weekender, if run) are spaced evenly between
+            the two parties: tea dances snap to the nearest Sunday, the weekender to a Friday. The timeline
+            shows the shaded terms with each class night, and the socials as labelled markers.
+        </p>
+        <div id="calendar-chart" class="chart"></div>
+        <div id="calendar-table"></div>
 
         <h3>Level 1 sign-ups per term</h3>
         <p>
@@ -144,31 +186,30 @@
 
         <!-- References -->
         <h2 id="references">References &amp; where the numbers come from</h2>
-        <p>The nominal (default) figures are drawn from these sources:</p>
+        <p>The nominal (best-guess) figures are drawn from these sources:</p>
         <ul class="refs">
             <li><strong>Attendance figures</strong> (Level 1 sign-ups, Level 2 and social turnout, the
                 weekender's repeat audience, loyalty refunds) are fitted from the society's own attendance
-                database &mdash; the same records behind the <a href="/attendance">Attendance</a> page.</li>
+                database: the same records behind the <a href="/attendance">Attendance</a> page.</li>
             <li><strong>Band fee</strong> is a distribution fitted to eight real band payments from the
-                2023&ndash;25 bank statements (mean about &pound;672), each uprated for inflation.</li>
-            <li><strong>Membership</strong> is the mean of the paid-member counts for 2024&ndash;26; its
-                year-to-year spread sets its uncertainty.</li>
+                2023&ndash;25 bank statements (mean about &pound;717), each uprated for inflation.</li>
+            <li><strong>Membership</strong> is the mean of the paid-member counts for 2024&ndash;26 (64, 85,
+                66); their year-to-year spread sets its uncertainty.</li>
+            <li><strong>Weekender ticket mix</strong> (full pass, day pass, social pass, single social) is
+                inferred from the 30th-anniversary weekender, where the evening socials drew far more people
+                than the daytime classes.</li>
             <li><strong>Prices, pay rates, room hours, the opening bank balance and overheads</strong> are
-                the committee's current real figures, held in a private spreadsheet off GitHub.</li>
+                the committee's current real figures, held in a private spreadsheet.</li>
             <li><strong>Inflation</strong> uses the ONS Consumer Prices Index, 12-month rate
                 (<a href="https://www.ons.gov.uk/economy/inflationandpriceindices/timeseries/d7g7/mm23"
                 target="_blank" rel="noopener">series D7G7</a>).</li>
             <li><strong>Ticketing fees</strong>: Dancecloud 2.5% + 50p per ticket (capped &pound;5), and
                 Stripe 1.5% + 20p charged separately on the daily transfer to our bank.</li>
-            <li><strong>The unscented transform</strong> (used to produce the confidence ranges cheaply) is
-                the sigma-point method at the heart of the
+            <li><strong>The confidence ranges</strong> are produced cheaply with the
+                <strong>unscented transform</strong> (the sigma-point method at the heart of the
                 <a href="https://en.wikipedia.org/wiki/Unscented_transform" target="_blank"
-                rel="noopener">unscented Kalman filter</a>.</li>
+                rel="noopener">unscented Kalman filter</a>), which is fast enough to update as you edit.</li>
         </ul>
-        <p class="muted">
-            The forecasting notebook remains the design surface and the fuller write-up; this page is a
-            faithful port of it for interactive use.
-        </p>
         {% endif %}
     </main>
 
