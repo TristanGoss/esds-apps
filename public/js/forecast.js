@@ -305,6 +305,7 @@
     renderCalendarChart(r);
     renderCalendar(r);
     renderL1(r);
+    renderAttendance(r);
     renderSurvival(r);
     renderVariance(r);
     document.getElementById('loyalty-every-label').textContent = ordinal(r.detail.loyalty_every);
@@ -450,11 +451,25 @@
   function renderL1(r) {
     const d = r.detail.l1_signups;
     const terms = d.map(x => 'T' + x.term);
-    const hist = r.detail.l1_history.map(h => [h.pos - 1, h.interest]);
+    const histRaw = r.detail.l1_history;
+    const histPts = histRaw.map(h => [h.pos - 1, h.interest]);
+    const conf = Math.round(r.confidence * 100);
+    // Custom tooltip so it names the forecast, its range and the past terms — not the raw stacked band.
+    const tip = params => {
+      if (!params.length) return '';
+      const idx = terms.indexOf(params[0].axisValue);
+      if (idx < 0) return '';
+      const x = d[idx];
+      const past = histRaw.filter(h => h.pos === x.term).map(h => Math.round(h.interest));
+      let s = `Term ${x.term}<br>Forecast: <b>${Math.round(x.mean)}</b> sign-ups<br>` +
+        `${conf}% range: ${Math.round(x.lo)} to ${Math.round(x.hi)}`;
+      if (past.length) s += `<br>past terms: ${past.join(', ')}`;
+      return s;
+    };
     const c = chart('l1-chart');
     c.setOption({
       grid: { left: 48, right: 20, top: 30, bottom: 36 },
-      tooltip: { trigger: 'axis' },
+      tooltip: { trigger: 'axis', formatter: tip },
       legend: { data: ['forecast', 'past terms'], top: 0 },
       xAxis: { type: 'category', data: terms, name: 'term' },
       yAxis: { type: 'value', scale: true },
@@ -462,8 +477,64 @@
         ...band(d.map(x => x.lo), d.map(x => x.hi), '#2ca02c'),
         { type: 'line', name: 'forecast', data: d.map(x => x.mean), symbol: 'circle', symbolSize: 7,
           lineStyle: { color: '#2ca02c' }, itemStyle: { color: '#2ca02c' }, z: 3 },
-        { type: 'scatter', name: 'past terms', data: hist, symbolSize: 6,
+        { type: 'scatter', name: 'past terms', data: histPts, symbolSize: 6,
           itemStyle: { color: 'rgba(120,120,120,0.55)' }, z: 2 },
+      ],
+    }, true);
+  }
+
+  // The key head-count inputs (Level 2, socials, weekender, members) as horizontal bars with 95% whiskers.
+  const ATTEND_LABELS = {
+    'Level 2 / night': 'Level 2 class (per night)',
+    'social attendance': 'Standalone social (per event)',
+    'Christmas party': 'Christmas party (per event)',
+    'social-only / night': 'Thursday social-only (per night)',
+    'weekender audience': 'Weekender recurring audience',
+    members: 'Paid members (per year)',
+  };
+
+  // renderItem for a horizontal error-bar whisker (low–high line with end caps) on a category row.
+  function whiskerItem(params, api) {
+    const cat = api.value(0);
+    const loPt = api.coord([api.value(1), cat]);
+    const hiPt = api.coord([api.value(2), cat]);
+    const y = loPt[1];
+    const cap = 5;
+    const style = { stroke: '#333', lineWidth: 1.5 };
+    return {
+      type: 'group',
+      children: [
+        { type: 'line', shape: { x1: loPt[0], y1: y, x2: hiPt[0], y2: y }, style: style },
+        { type: 'line', shape: { x1: loPt[0], y1: y - cap, x2: loPt[0], y2: y + cap }, style: style },
+        { type: 'line', shape: { x1: hiPt[0], y1: y - cap, x2: hiPt[0], y2: y + cap }, style: style },
+      ],
+    };
+  }
+
+  function renderAttendance(r) {
+    const rows = (r.detail.inputs || [])
+      .filter(x => ATTEND_LABELS[x.name])
+      .map(x => ({ label: ATTEND_LABELS[x.name], mean: x.mean, lo: x.lo, hi: x.hi }))
+      .sort((a, b) => a.mean - b.mean);  // smallest at the bottom, largest on top
+    const cats = rows.map(x => x.label);
+    const bars = rows.map(x => Math.round(x.mean * 10) / 10);
+    const whiskers = rows.map((x, i) => [i, x.lo, x.hi]);
+    const conf = Math.round(r.confidence * 100);
+    const c = chart('attendance-chart');
+    c.setOption({
+      grid: { left: 200, right: 60, top: 16, bottom: 36 },
+      tooltip: { trigger: 'item',
+        formatter: p => {
+          const x = rows[p.dataIndex];
+          return `${x.label}<br>best guess: <b>${bars[p.dataIndex]}</b><br>${conf}% range: ${Math.round(x.lo)} to ${Math.round(x.hi)}`;
+        } },
+      xAxis: { type: 'value', min: 0, name: 'heads', nameLocation: 'middle', nameGap: 24 },
+      yAxis: { type: 'category', data: cats, axisLabel: { interval: 0, width: 190, overflow: 'break' } },
+      series: [
+        { type: 'bar', data: bars, barWidth: '55%', itemStyle: { color: '#2ca02c' },
+          label: { show: true, position: 'right', formatter: '{c}' }, z: 1 },
+        { type: 'custom', renderItem: whiskerItem, data: whiskers, silent: true, z: 2,
+          encode: { x: [1, 2], y: 0 } },
       ],
     }, true);
   }

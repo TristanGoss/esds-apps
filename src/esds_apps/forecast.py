@@ -1070,7 +1070,13 @@ def predict(overrides: dict | None = None, confidence: float | None = None) -> d
             'l2_survival': ctx.survival_l2,
             'loyalty_every': int(p['loyalty_every']),
             'inputs': [
-                {'name': INPUT_NAMES[i], 'mean': round(float(mu[i]), 3), 'sd': round(float(np.sqrt(sigma[i, i])), 3)}
+                {
+                    'name': INPUT_NAMES[i],
+                    'mean': round(float(mu[i]), 3),
+                    'sd': round(float(np.sqrt(sigma[i, i])), 3),
+                    'lo': round(max(float(mu[i]) - z * float(np.sqrt(sigma[i, i])), 0.0), 2),
+                    'hi': round(float(mu[i]) + z * float(np.sqrt(sigma[i, i])), 2),
+                }
                 for i in range(len(mu))
             ],
         },
