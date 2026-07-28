@@ -26,6 +26,7 @@ DEFAULTS = {
     'loyalty_every': 8,
     'class_size_cap': None,
     'l1_per_night': False,
+    'class_card_size': 1,
     'confidence': 0.95,
     'price_class_disc': 7,
     'price_class_ord': 8,
@@ -40,6 +41,7 @@ DEFAULTS = {
     'price_wk_social': 40,
     'membership_fee': 12,
     'room_per_hour': 35,
+    'room_per_hour_b': 20,
     'class_room_hour_a': 2.75,
     'class_room_hour_b': 2.0,
     'teacher_rate': 15,
@@ -49,10 +51,12 @@ DEFAULTS = {
     'teacher_hours_d': 1,
     'social_snacks': 65,
     'social_room_hours': 4,
+    'social_room_per_hour': 35,
     'band_cost_mean': 717.0,
     'band_cost_std': 97.0,
     'weekender_bands': 3,
     'weekender_room_hours': 40,
+    'weekender_room_per_hour': 40,
     'weekender_teachers': 2,
     'weekender_teacher_rate': 60,
     'weekender_teacher_hours': 12,
@@ -61,6 +65,7 @@ DEFAULTS = {
     'weekender_nights': 2,
     'n_committee': 9,
     'n_safer_spaces': 4,
+    'safer_spaces_accounts': True,
     'n_extra_volunteers': 4,
     'n_legacy_accounts': 2,
     'n_shared_accounts': 1,
@@ -250,6 +255,42 @@ def test_calendar_dates_exposed(ctx):
     cal = forecast.predict()['calendar']
     assert cal['first_class'] and len(cal['terms']) == 6
     assert {'Christmas party', 'End-of-year party'} <= {s['label'] for s in cal['socials']}
+
+
+def test_safer_spaces_accounts_toggle(ctx):
+    """Turning off safer-spaces Workspace accounts drops those seats from the overheads bill."""
+    on = forecast.predict({'safer_spaces_accounts': True})
+    off = forecast.predict({'safer_spaces_accounts': False})
+    oh_on = [b['amount'] for b in on['budget'] if b['category'] == 'Overheads'][0]
+    oh_off = [b['amount'] for b in off['budget'] if b['category'] == 'Overheads'][0]
+    # 4 safer-spaces seats * £5.90/mo * 12 = ~£283/yr less
+    assert oh_off < oh_on
+    assert round(oh_on - oh_off) == round(4 * 5.9 * 12)
+
+
+def test_separate_room_rates(ctx):
+    """The second Thursday room, socials and weekender each have their own hourly rate."""
+    base = forecast.predict()['net']['mean']
+    # a dearer second Thursday room only raises class-venue cost
+    dearer_second = forecast.predict({'room_per_hour_b': 40})['net']['mean']
+    assert dearer_second < base
+    # the social and weekender rates are independent of the Thursday main rate
+    dearer_social = forecast.predict({'social_room_per_hour': 100})['net']['mean']
+    dearer_wk = forecast.predict({'weekender_room_per_hour': 100})['net']['mean']
+    assert dearer_social < base and dearer_wk < base
+
+
+def test_class_card_reduces_dancecloud_fees(ctx):
+    """Bigger class-card packs cut Dancecloud fees (fixed fee amortised over the pack) without changing revenue."""
+    single = forecast.predict({'class_card_size': 1})
+    pack = forecast.predict({'class_card_size': 10})
+    fee_single = [b['amount'] for b in single['budget'] if b['category'] == 'Dancecloud fees'][0]
+    fee_pack = [b['amount'] for b in pack['budget'] if b['category'] == 'Dancecloud fees'][0]
+    assert fee_pack < fee_single
+    # Level 2 revenue is unchanged by how the tickets are packaged
+    rev_single = [b['amount'] for b in single['budget'] if b['category'] == 'Level 2 classes'][0]
+    rev_pack = [b['amount'] for b in pack['budget'] if b['category'] == 'Level 2 classes'][0]
+    assert rev_single == rev_pack
 
 
 # ---------------------------------------------------------------- defaults CSV loading

@@ -95,6 +95,7 @@ PARAM_LABELS = {
     'loyalty_every': 'Refund every Nth ticket',
     'class_size_cap': 'Thursday night single class size cap',
     'l1_per_night': 'Sell Level 1 night-by-night',
+    'class_card_size': 'Class card pack size (L2 & social-only)',
     'confidence': 'Confidence level',
     'price_class_disc': 'Class price, member/concession',
     'price_class_ord': 'Class price, ordinary',
@@ -108,7 +109,8 @@ PARAM_LABELS = {
     'price_wk_day_ord': 'Weekender day pass, ordinary',
     'price_wk_social': 'Weekender social pass (evenings only)',
     'membership_fee': 'Membership fee',
-    'room_per_hour': 'Room hire per hour',
+    'room_per_hour': 'Main room hire per hour',
+    'room_per_hour_b': 'Second room hire per hour',
     'class_room_hour_a': 'Main room hours',
     'class_room_hour_b': 'Second room hours',
     'teacher_rate': 'Teacher pay per hour',
@@ -118,10 +120,12 @@ PARAM_LABELS = {
     'teacher_hours_d': 'Teacher 4 hours',
     'social_snacks': 'Snacks per event',
     'social_room_hours': 'Room hours per social',
+    'social_room_per_hour': 'Social room hire per hour',
     'band_cost_mean': 'Typical band fee (mean)',
     'band_cost_std': 'Band fee standard deviation',
     'weekender_bands': 'Weekender: number of bands',
     'weekender_room_hours': 'Weekender: total room hours',
+    'weekender_room_per_hour': 'Weekender: room hire per hour',
     'weekender_teachers': 'Weekender: number of teachers',
     'weekender_teacher_rate': 'Weekender: teacher pay per hour',
     'weekender_teacher_hours': 'Weekender: teacher hours each',
@@ -130,6 +134,7 @@ PARAM_LABELS = {
     'weekender_nights': 'Weekender: nights of board',
     'n_committee': 'Committee members',
     'n_safer_spaces': 'Safer-spaces team',
+    'safer_spaces_accounts': 'Safer-spaces team have Workspace accounts',
     'n_extra_volunteers': 'Other volunteers',
     'n_legacy_accounts': 'Legacy Workspace seats',
     'n_shared_accounts': 'Devices Workspace seats',
@@ -695,7 +700,8 @@ def run_scenario(ctx: ForecastContext, p: dict, cal: dict, socials: list, x: np.
         ledger.append((dt, cat, kind, gross, n_txn * dc_fee(ticket_amt) if n_txn else 0.0, cost, is_loyalty))
 
     fc_l2_thu = sum(t['weeks'] for t in cal['terms'])
-    class_venue = (p['class_room_hour_a'] + p['class_room_hour_b']) * p['room_per_hour']
+    # Two Thursday rooms hired at (usually) different rates: the main hall and a cheaper second room.
+    class_venue = p['class_room_hour_a'] * p['room_per_hour'] + p['class_room_hour_b'] * p['room_per_hour_b']
     class_teachers = (p['teacher_hours_a'] + p['teacher_hours_b'] + p['teacher_hours_c'] + p['teacher_hours_d']) * p[
         'teacher_rate'
     ]
@@ -704,6 +710,9 @@ def run_scenario(ctx: ForecastContext, p: dict, cal: dict, socials: list, x: np.
     social_only_price = _blended(p['price_social_only_disc'], p['price_social_only_ord'], fsoc)
     loyalty_per_thu = loyalty_refunds * l2_price / fc_l2_thu
     cap = p.get('class_size_cap') or None
+    # "Class card": L2 and social-only tickets can be bought in a pack of this many (usable on any night,
+    # unlike an L1 term block). The Dancecloud fee then applies once per pack, not per ticket. 1 = per night.
+    cc = max(1, int(p.get('class_card_size', 1)))
 
     add(
         cal['first_class'],
@@ -725,14 +734,23 @@ def run_scenario(ctx: ForecastContext, p: dict, cal: dict, socials: list, x: np.
             if p['l1_per_night']:
                 la = signups * (ctx.l1_attend_curve[w] if w < len(ctx.l1_attend_curve) else ctx.l1_attend_curve[-1])
                 add(thu, 'Level 1 classes', 'revenue', gross=la * class_price, n_txn=round(la), ticket_amt=class_price)
-            add(thu, 'Level 2 classes', 'revenue', gross=l2_att * l2_price, n_txn=round(l2_att), ticket_amt=l2_price)
+            # Class cards: the same revenue, but bought in packs of ``cc`` so the Dancecloud fee is charged
+            # once per pack (fewer, larger transactions) rather than per night.
+            add(
+                thu,
+                'Level 2 classes',
+                'revenue',
+                gross=l2_att * l2_price,
+                n_txn=round(l2_att) / cc,
+                ticket_amt=cc * l2_price,
+            )
             add(
                 thu,
                 'Social-only tickets',
                 'revenue',
                 gross=social_only * social_only_price,
-                n_txn=round(social_only),
-                ticket_amt=social_only_price,
+                n_txn=round(social_only) / cc,
+                ticket_amt=cc * social_only_price,
             )
             add(thu, 'Class venue', 'cost', cost=class_venue)
             add(thu, 'Class teachers', 'cost', cost=class_teachers)
@@ -765,7 +783,7 @@ def run_scenario(ctx: ForecastContext, p: dict, cal: dict, socials: list, x: np.
             )
             add(dt, 'Weekender costs', 'cost', cost=p['weekender_bands'] * band_cost)
             add(dt, 'Weekender costs', 'cost', cost=p['weekender_bands'] * p['social_snacks'])
-            add(dt, 'Weekender costs', 'cost', cost=p['weekender_room_hours'] * p['room_per_hour'])
+            add(dt, 'Weekender costs', 'cost', cost=p['weekender_room_hours'] * p['weekender_room_per_hour'])
             add(
                 dt,
                 'Weekender costs',
@@ -785,7 +803,7 @@ def run_scenario(ctx: ForecastContext, p: dict, cal: dict, socials: list, x: np.
             add(dt, 'Social tickets', 'revenue', gross=att * price, n_txn=round(att), ticket_amt=price)
             add(dt, 'Social costs', 'cost', cost=band_cost)
             add(dt, 'Social costs', 'cost', cost=p['social_snacks'])
-            add(dt, 'Social costs', 'cost', cost=p['social_room_hours'] * p['room_per_hour'])
+            add(dt, 'Social costs', 'cost', cost=p['social_room_hours'] * p['social_room_per_hour'])
 
     vol_heads = p['n_committee'] + p['n_safer_spaces'] + p['n_extra_volunteers']
     n_vol_socials = int(p.get('n_volunteer_socials', 2))
@@ -794,7 +812,9 @@ def run_scenario(ctx: ForecastContext, p: dict, cal: dict, socials: list, x: np.
         dt = start + (eoy - start) * (i + 1) // (n_vol_socials + 1)
         add(dt, 'Volunteer socials', 'cost', cost=vol_heads * p['volunteer_social_per_head'])
 
-    n_seats = p['n_committee'] + p['n_safer_spaces'] + p['n_legacy_accounts'] + p['n_shared_accounts']
+    n_seats = p['n_committee'] + p['n_legacy_accounts'] + p['n_shared_accounts']
+    if p.get('safer_spaces_accounts', True):
+        n_seats += p['n_safer_spaces']  # safer-spaces volunteers hold Workspace seats unless this is off
     overheads = {k: p['oh_' + k] for k in OVERHEAD_KEYS}
     overheads['google_workspace'] = n_seats * p['gsuite_seat_monthly'] * 12 + p['wix_reseller_annual']
     oh_months = [date(cal['ay'] if m >= _SEPTEMBER else cal['ay'] + 1, m, 1) for m in (9, 10, 11, 12, 1, 2, 3, 4, 5, 6)]
@@ -971,11 +991,12 @@ def _contributors(ctx, p, cal, socials, mu, sigma):
 def _merge_params(ctx: ForecastContext, overrides: dict) -> dict:
     """Start from the spreadsheet defaults and apply the caller's overrides, coercing types."""
     p = dict(ctx.defaults)
-    bool_keys = {'have_weekender', 'loyalty_enabled', 'l1_per_night'}
+    bool_keys = {'have_weekender', 'loyalty_enabled', 'l1_per_night', 'safer_spaces_accounts'}
     int_keys = {
         'forecast_ay',
         'n_tea_dances',
         'loyalty_every',
+        'class_card_size',
         'n_committee',
         'n_safer_spaces',
         'n_extra_volunteers',
