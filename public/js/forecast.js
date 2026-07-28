@@ -23,9 +23,9 @@
     { title: 'Thursday classes', controls: [
       { k: 'price_class_disc', label: 'Class price, member/concession', type: 'money', help: 'Per-night class price for members and concessions.' },
       { k: 'price_class_ord', label: 'Class price, ordinary', type: 'money', help: 'Per-night class price for everyone else.' },
-      { k: 'room_per_hour', label: 'Main room hire per hour', type: 'money', help: 'Hourly hire rate for the main Thursday room.' },
+      { k: 'room_per_hour', label: 'Main room hire per hour', type: 'money', help: 'Hourly hire rate for the main Thursday room, assumed to be the George Young Hall in the Lifecare Centre.' },
       { k: 'class_room_hour_a', label: 'Main room hours', type: 'number', max: 24, help: 'Hours the main room is hired on a class night.' },
-      { k: 'room_per_hour_b', label: 'Second room hire per hour', type: 'money', help: 'Hourly hire rate for the (cheaper) second Thursday room.' },
+      { k: 'room_per_hour_b', label: 'Second room hire per hour', type: 'money', help: 'Hourly hire rate for the (cheaper) second Thursday room, assumed to be the Dining Room in the Lifecare Centre.' },
       { k: 'class_room_hour_b', label: 'Second room hours', type: 'number', max: 24, help: 'Hours the second room is hired on a class night.' },
       { k: 'teacher_rate', label: 'Teacher pay per hour', type: 'money', help: 'Paid to each teacher per hour taught.' },
       { k: 'teacher_hours_a', label: 'Teacher 1 hours', type: 'number', max: 24, help: 'Hours taught by the first teacher on a class night.' },
@@ -48,7 +48,7 @@
       { k: 'band_cost_std', label: 'Band fee: standard deviation', type: 'money', help: 'How much band fees vary around the mean. Feeds the uncertainty band. Default is the spread of the same eight real payments (about £97).' },
       { k: 'social_snacks', label: 'Snacks per event', type: 'money', help: 'Snacks/refreshments provided at each social.' },
       { k: 'social_room_hours', label: 'Room hours per social', type: 'number', max: 24, help: 'Hours the venue is hired for a standalone social.' },
-      { k: 'social_room_per_hour', label: 'Room hire per hour', type: 'money', help: 'Hourly hire rate for the room used for a standalone social.' },
+      { k: 'social_room_per_hour', label: 'Room hire per hour', type: 'money', help: 'Hourly hire rate for the room used for a standalone social, assumed to be the George Young Hall in the Lifecare Centre.' },
     ]},
     { title: 'Weekender', controls: [
       { k: 'have_weekender', label: 'Run a weekender', type: 'toggle', help: 'Whether the annual weekender happens at all.' },
