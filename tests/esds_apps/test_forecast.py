@@ -27,6 +27,7 @@ DEFAULTS = {
     'class_size_cap': None,
     'l1_per_night': False,
     'class_card_size': 1,
+    'easter_break': False,
     'confidence': 0.95,
     'price_class_disc': 7,
     'price_class_ord': 8,
@@ -151,6 +152,38 @@ def test_build_calendar_six_terms():
     assert cal['eoy_party'].month == 6
     # terms run back to back within each region and cover 5-7 weeks each
     assert all(5 <= t['weeks'] <= 7 for t in cal['terms'])
+
+
+def test_january_term_start_clears_new_year():
+    """The January term starts on the first Thursday whose week does not contain New Year's Day."""
+    from datetime import date
+
+    # 2026/27: 1 Jan 2027 is a Friday, so the first clear Thursday is 7 Jan (not the 2nd Thursday, 14 Jan).
+    cal = forecast.build_calendar(2026)
+    jan = next(t for t in cal['terms'] if t['start'].month == 1)
+    assert jan['start'] == date(2027, 1, 7)
+    # the start is always a Thursday whose Monday-Sunday week excludes 1 Jan
+    for ay in range(2024, 2031):
+        start = forecast._jan_term_start(ay + 1)
+        assert start.weekday() == forecast.THU
+        assert forecast._week_monday(start) != forecast._week_monday(date(ay + 1, 1, 1))
+
+
+def test_easter_break_toggle():
+    """Off by default (teach through Easter); on drops the Easter-week Thursday."""
+    from datetime import timedelta
+
+    from dateutil.easter import easter
+
+    def all_thu(cal):
+        return {d for t in cal['terms'] for d in t['thursdays']}
+
+    no_break = forecast.build_calendar(2026, easter_break=False)
+    with_break = forecast.build_calendar(2026, easter_break=True)
+    easter_thu = forecast._week_monday(easter(2027)) + timedelta(days=forecast.THU)
+    assert easter_thu in all_thu(no_break)  # taught by default
+    assert easter_thu not in all_thu(with_break)  # dropped when the break is on
+    assert sum(t['weeks'] for t in with_break['terms']) == sum(t['weeks'] for t in no_break['terms']) - 1
 
 
 def test_place_socials_orders_weekender_in_spring():

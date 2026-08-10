@@ -19,6 +19,7 @@
   const SECTIONS = [
     { title: 'Calendar forecast', controls: [
       { k: 'forecast_ay', label: 'Academic year start', type: 'int', min: 2020, max: THIS_YEAR + 5, help: 'The September the forecast year begins (2026 = Sept 2026 to summer 2027).' },
+      { k: 'easter_break', label: 'Take an Easter break', type: 'toggle', help: 'If on, there is no class in the week containing Easter Sunday (a one-week break). Off by default: the society usually teaches straight through Easter.' },
     ]},
     { title: 'Thursday classes', controls: [
       { k: 'price_class_disc', label: 'Class price, member/concession', type: 'money', help: 'Per-night class price for members and concessions.' },

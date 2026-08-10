@@ -90,6 +90,7 @@ OVERHEAD_KEYS = [
 PARAM_LABELS = {
     'forecast_ay': 'Academic year start',
     'n_tea_dances': 'Number of tea dances',
+    'easter_break': 'Take an Easter break',
     'have_weekender': 'Run a weekender',
     'loyalty_enabled': 'Level 2 loyalty scheme',
     'loyalty_every': 'Refund every Nth ticket',
@@ -221,25 +222,40 @@ def _best_split(n_weeks: int) -> list[int]:
     return opts[0]
 
 
-def build_calendar(ay: int) -> dict:
-    """Derive the six-term teaching calendar and the fixed party dates for academic year ``ay``."""
+def _jan_term_start(year: int) -> date:
+    """The first January Thursday whose Mon-Sun week does not contain New Year's Day."""
+    nyd = date(year, 1, 1)
+    d = _nth_weekday(year, 1, THU, 1)
+    while _week_monday(d) == _week_monday(nyd):
+        d += timedelta(days=7)
+    return d
+
+
+def build_calendar(ay: int, easter_break: bool = False) -> dict:
+    """Derive the six-term teaching calendar and the fixed party dates for academic year ``ay``.
+
+    If ``easter_break`` is set, the class night in the week containing Easter Sunday is dropped and the
+    post-Christmas block is split either side of it; by default classes run straight through Easter.
+    """
     term1_first = _nth_weekday(ay, 9, THU, 2)
     xmas = date(ay, 12, 25)
     xmas_party = _week_monday(xmas) - timedelta(days=7) + timedelta(days=THU)
     term2_last = xmas_party - timedelta(days=7)
-    term3_first = _nth_weekday(ay + 1, 1, THU, 2)
+    term3_first = _jan_term_start(ay + 1)
     eoy_party = _last_weekday(ay + 1, 6, THU)
     final_term_last = eoy_party - timedelta(days=7)
     easter_thu = _week_monday(easter(ay + 1)) + timedelta(days=THU)
 
     pre_xmas = _thursdays_between(term1_first, term2_last)
     post_all = _thursdays_between(term3_first, final_term_last)
-    post_xmas = [d for d in post_all if d != easter_thu]
-    pre_easter = [d for d in post_xmas if d < easter_thu]
-    post_easter = [d for d in post_xmas if d > easter_thu]
+    if easter_break:
+        post_xmas = [d for d in post_all if d != easter_thu]
+        regions = (pre_xmas, [d for d in post_xmas if d < easter_thu], [d for d in post_xmas if d > easter_thu])
+    else:
+        regions = (pre_xmas, post_all)
 
     terms, num = [], 1
-    for region in (pre_xmas, pre_easter, post_easter):
+    for region in regions:
         i = 0
         for weeks in _best_split(len(region)):
             chunk = region[i : i + weeks]
@@ -991,7 +1007,7 @@ def _contributors(ctx, p, cal, socials, mu, sigma):
 def _merge_params(ctx: ForecastContext, overrides: dict) -> dict:
     """Start from the spreadsheet defaults and apply the caller's overrides, coercing types."""
     p = dict(ctx.defaults)
-    bool_keys = {'have_weekender', 'loyalty_enabled', 'l1_per_night', 'safer_spaces_accounts'}
+    bool_keys = {'have_weekender', 'loyalty_enabled', 'l1_per_night', 'safer_spaces_accounts', 'easter_break'}
     int_keys = {
         'forecast_ay',
         'n_tea_dances',
@@ -1033,7 +1049,7 @@ def predict(overrides: dict | None = None, confidence: float | None = None) -> d
     conf = min(0.999, max(0.5, conf))
     z = _z(conf)
 
-    cal = build_calendar(int(p['forecast_ay']))
+    cal = build_calendar(int(p['forecast_ay']), bool(p.get('easter_break', False)))
     socials = place_socials(cal, int(p['n_tea_dances']), bool(p['have_weekender']))
     mu, sigma = _mu_sigma(ctx, p, cal)
 
