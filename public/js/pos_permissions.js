@@ -73,3 +73,13 @@ document.addEventListener('click', function (e) {
     })
     .catch(() => { alert('Failed to remove volunteer.'); });
 });
+
+// Enable the "add volunteer" button only once an email has been typed.
+const addInput = document.getElementById("add-via-email");
+const addBtn = document.getElementById("add-volunteer-btn");
+addInput.addEventListener("input", function () {
+    addBtn.disabled = !addInput.value.trim();
+});
+addBtn.addEventListener("click", function () {
+    submitAdd(addInput.value.trim());
+});

@@ -177,3 +177,9 @@ document.addEventListener('click', function (e) {
         );
     }
 });
+
+// The "View Front" buttons carry their card number in a data attribute rather than an inline onclick (the CSP forbids those).
+document.addEventListener("click", function (e) {
+    const button = e.target.closest(".view-front-btn");
+    if (button) showImageModal(button.dataset.cardNumber);
+});

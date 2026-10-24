@@ -14,3 +14,9 @@ document.addEventListener("DOMContentLoaded", function () {
         });
     });
 });
+
+// Ask for confirmation before submitting any form that declares a data-confirm message (no inline onclick: the CSP forbids those).
+document.addEventListener("submit", function (e) {
+    const message = e.target.dataset ? e.target.dataset.confirm : undefined;
+    if (message && !confirm(message)) e.preventDefault();
+});

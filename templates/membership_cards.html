@@ -52,8 +52,8 @@
                         <td class="action-cell" data-label="Actions">
                             <div class="action-group">
                                 <button type="button"
-                                        onclick="showImageModal('{{ card.card_number }}')"
-                                        class="action-button">
+                                        data-card-number="{{ card.card_number }}"
+                                        class="action-button view-front-btn">
                                     View Front
                                 </button>
                                 <button type="button"

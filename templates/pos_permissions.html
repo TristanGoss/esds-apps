@@ -62,15 +62,5 @@
         </form>
     </main>
     <script src="/public/js/pos_permissions.js"></script>
-    <script>
-    const addInput = document.getElementById('add-via-email');
-    const addBtn = document.getElementById('add-volunteer-btn');
-    addInput.addEventListener('input', function() {
-        addBtn.disabled = !addInput.value.trim();
-    });
-    addBtn.addEventListener('click', function() {
-        submitAdd(addInput.value.trim());
-    });
-    </script>
 </body>
 </html>

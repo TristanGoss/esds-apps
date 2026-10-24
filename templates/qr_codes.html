@@ -53,9 +53,9 @@
                         <a href="/qr-codes/{{ qr.code_id }}/qr.png" target="_blank">PNG</a>
                     </td>
                     <td data-label="Actions">
-                        <form class="inline-form" method="post">
+                        <form class="inline-form" method="post" data-confirm="Delete this QR code?">
                             <input type="hidden" name="delete_code_id" value="{{ qr.code_id }}">
-                            <button type="submit" class="danger" onclick="return confirm('Delete this QR code?');">Delete</button>
+                            <button type="submit" class="danger">Delete</button>
                         </form>
                     </td>
                 </tr>
