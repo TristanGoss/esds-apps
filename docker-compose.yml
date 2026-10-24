@@ -8,6 +8,8 @@ services:
       - ALL
     security_opt:
       - no-new-privileges:true
+    logging:
+      driver: journald
     expose:
     - "8080"
     volumes:
@@ -25,6 +27,8 @@ services:
     security_opt:
       - no-new-privileges:true
     container_name: nginx
+    logging:
+      driver: journald
     ports:
       - "80:80"
       - "443:443"
