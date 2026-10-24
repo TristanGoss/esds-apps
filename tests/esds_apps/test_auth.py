@@ -34,6 +34,25 @@ def test_safe_next_path_external_url():
     assert _safe_next_path('https://evil.com') == '/'
 
 
+_HOSTILE_NEXT_PATHS = [
+    '/' + chr(92) + 'evil.example',
+    '/ok' + chr(92) + 'x',
+    '/' + chr(9) + '/evil.example',
+    '/x' + chr(13) + chr(10) + 'Set-Cookie: a=b',
+    '/x' + chr(10),
+    'javascript:alert(1)',
+]
+
+
+@pytest.mark.parametrize('hostile', _HOSTILE_NEXT_PATHS)
+def test_safe_next_path_rejects_backslashes_and_control_characters(hostile):
+    assert _safe_next_path(hostile) == '/'
+
+
+def test_safe_next_path_keeps_ordinary_paths_with_queries():
+    assert _safe_next_path('/membership-cards?x=1&y=2') == '/membership-cards?x=1&y=2'
+
+
 def test_safe_next_path_double_slash():
     assert _safe_next_path('//evil.com/steal') == '/'
 

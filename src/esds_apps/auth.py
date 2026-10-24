@@ -30,9 +30,16 @@ _OAUTH_STATE_COOKIE = 'oauth_state'
 _OAUTH_NEXT_COOKIE = 'oauth_next'
 
 
+_BACKSLASH = chr(92)
+
+
 def _safe_next_path(path: str) -> str:
-    """Return path only if it looks like a local path, else '/'."""
-    if path and path.startswith('/') and not path.startswith('//'):
+    """Return path only if it looks like a local path, else '/'.
+
+    Backslashes and control characters are refused outright: browsers treat a slash followed by a backslash like
+    '//', and we should not depend on the response class happening to percent-encode them.
+    """
+    if path and path.startswith('/') and not path.startswith('//') and path.isprintable() and _BACKSLASH not in path:
         return path
     return '/'
 
