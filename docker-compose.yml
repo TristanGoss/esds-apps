@@ -3,6 +3,11 @@ services:
     build: .
     container_name: esds-apps
     restart: always
+    # The app runs as an unprivileged user and needs no Linux capabilities.
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     expose:
     - "8080"
     volumes:
@@ -11,7 +16,11 @@ services:
       - ./esds-group-checker-sa.json:/run/secrets/esds-group-checker-sa.json:ro
 
   nginx:
-    image: nginx:stable
+    # Pinned by digest (nginx 1.30.6 at the time of pinning). To update: pull nginx:stable, check the digest it resolves
+    # to, and review the release notes before changing it here.
+    image: nginx:stable@sha256:a7675fcee220f59b4a99f7098c06a0d5d999c2c0ee37c0211efb780536e5cb20
+    security_opt:
+      - no-new-privileges:true
     container_name: nginx
     ports:
       - "80:80"
