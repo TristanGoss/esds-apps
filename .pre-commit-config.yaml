@@ -4,3 +4,17 @@ repos:
     hooks:
       - id: ruff-format
       - id: ruff
+  - repo: local
+    hooks:
+      - id: requirements-in-sync
+        name: requirements.txt matches poetry.lock
+        entry: poetry run python scripts/lock_tools.py export --check
+        language: system
+        files: ^(poetry\.lock|requirements\.txt)$
+        pass_filenames: false
+      - id: pip-audit
+        name: audit locked dependencies for known vulnerabilities
+        entry: poetry run python scripts/lock_tools.py audit
+        language: system
+        always_run: true  # new advisories appear without the lock changing; needs network, takes ~6s
+        pass_filenames: false

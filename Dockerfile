@@ -1,23 +1,28 @@
-FROM python:3.13-slim
+# Pinned by digest so a rebuild cannot silently pick up a different base image. To update, pull the new tag, check the
+# digest it resolves to, and review what changed: python:3.13-slim -> docker buildx imagetools inspect python:3.13-slim
+FROM python:3.13-slim@sha256:d98cc29d3266e535dd9da1099688d9cb3ca4753813571e071763d17725460962
 
 WORKDIR /app
 
-RUN pip install poetry
-# Keep the virtualenv inside the project so appuser can access it after the ownership transfer below
-ENV POETRY_VIRTUALENVS_IN_PROJECT=true
-COPY pyproject.toml poetry.lock /app/
-
-# Install Cairosvg dependencies
+# Install Cairosvg/WeasyPrint system dependencies. These come from Debian's own repositories and are deliberately not
+# version-pinned: pinning them would block the security updates the base image's maintainers publish.
 RUN apt-get update && apt-get install -y \
     libcairo2 \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
     libgdk-pixbuf-xlib-2.0-0 \
+    libharfbuzz-subset0 \
     fonts-dejavu-core \
-    fontconfig
+    fontconfig \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install python dependencies only as a separate layer (for speed in rebuilding)
-RUN poetry install --no-root
+# Python dependencies in a virtualenv, installed from requirements.txt, which scripts/lock_tools.py generates from
+# poetry.lock. Every package is pinned to an exact version and verified against its hash, and only the runtime ('main')
+# group is installed: no Poetry, test tooling or Jupyter stack in the image.
+RUN python -m venv /app/.venv
+ENV PATH="/app/.venv/bin:$PATH"
+COPY requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir --require-hashes --no-deps -r requirements.txt
 
 COPY ./README.md /app/README.md
 COPY ./src /app/src
@@ -33,11 +38,9 @@ COPY ./.env /app/.env
 
 ENV PYTHONPATH=/app/src
 
-RUN poetry install
-
 RUN groupadd --gid 1001 appuser && useradd --uid 1001 --gid 1001 --no-create-home appuser
 RUN chown -R appuser:appuser /app
 RUN mkdir -p /tmp/esds_cache && chown appuser:appuser /tmp/esds_cache
 USER appuser
 
-CMD ["poetry", "run", "uvicorn", "esds_apps.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["uvicorn", "esds_apps.main:app", "--host", "0.0.0.0", "--port", "8080", "--no-server-header"]
