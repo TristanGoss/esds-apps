@@ -655,9 +655,9 @@ async def qr_codes_table(request: Request):
             return RedirectResponse('/qr-codes', status_code=303)
     qr_codes = qr_db.list_qr_codes()
     return config.TEMPLATES.TemplateResponse(
+        request,
         'qr_codes.html',
         {
-            'request': request,
             'qr_codes': qr_codes,
             'error': error,
         },
