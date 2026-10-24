@@ -48,7 +48,7 @@ def test_proxy_include_is_only_used_inside_locations_and_has_no_uri_part():
         'a URI part on proxy_pass rewrites matched prefixes'
     )
     conf = _strip_comments((CONF_DIR / 'default.conf').read_text(encoding='utf-8'))
-    assert conf.count('proxy_app.inc') == 2
+    assert conf.count('proxy_app.inc') == 3
     assert all('proxy_app.inc' in body for body in _location_bodies(conf) if 'limit_req' in body)
 
 
