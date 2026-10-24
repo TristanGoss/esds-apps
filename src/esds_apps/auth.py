@@ -8,11 +8,11 @@ from typing import Callable
 from urllib.parse import urlencode
 
 import httpx
-from authlib.jose import JsonWebKey
-from authlib.jose import jwt as jose_jwt
 from fastapi import HTTPException, Request
 from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from joserfc import jwt as jose_jwt
+from joserfc.jwk import KeySet, RSAKey
 
 from esds_apps import config
 
@@ -24,6 +24,7 @@ _GOOGLE_AUTH_URL = 'https://accounts.google.com/o/oauth2/v2/auth'
 _GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token'
 _GOOGLE_CERTS_URL = 'https://www.googleapis.com/oauth2/v3/certs'
 _GOOGLE_ADMIN_API = 'https://admin.googleapis.com/admin/directory/v1'
+_GOOGLE_ID_TOKEN_ALG = 'RS256'
 _OAUTH_STATE_COOKIE = 'oauth_state'
 _OAUTH_NEXT_COOKIE = 'oauth_next'
 
@@ -128,17 +129,14 @@ async def handle_oauth_callback(request: Request) -> RedirectResponse:
     # Verify the ID token using Google's public keys
     async with httpx.AsyncClient() as client:
         jwks_resp = await client.get(_GOOGLE_CERTS_URL)
-    jwks = JsonWebKey.import_key_set(jwks_resp.json())
-    claims = jose_jwt.decode(
-        id_token,
-        jwks,
-        claims_options={
-            'iss': {'essential': True, 'values': ['https://accounts.google.com', 'accounts.google.com']},
-            'aud': {'essential': True, 'value': config.SECRETS['GOOGLE_CLIENT_ID']},
-        },
-    )
-    claims.validate()
-    email = claims['email']
+    jwks = KeySet.import_key_set(jwks_resp.json())
+    token = jose_jwt.decode(id_token, jwks, algorithms=[_GOOGLE_ID_TOKEN_ALG])
+    jose_jwt.JWTClaimsRegistry(
+        iss={'essential': True, 'values': ['https://accounts.google.com', 'accounts.google.com']},
+        aud={'essential': True, 'value': config.SECRETS['GOOGLE_CLIENT_ID']},
+        exp={'essential': True},
+    ).validate(token.claims)
+    email = token.claims['email']
 
     # Check the user is in the allowed group
     if not await _is_group_member(email):
@@ -172,8 +170,7 @@ async def _get_service_account_token(scopes: list[str]) -> str:
         'iat': now,
         'exp': now + 3600,
     }
-    token = jose_jwt.encode({'alg': 'RS256'}, sa_claims, sa_info['private_key'].encode())
-    assertion = token.decode() if isinstance(token, bytes) else token
+    assertion = jose_jwt.encode({'alg': 'RS256'}, sa_claims, RSAKey.import_key(sa_info['private_key']))
 
     async with httpx.AsyncClient() as client:
         resp = await client.post(
