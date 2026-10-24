@@ -12,7 +12,7 @@ from http import HTTPStatus
 from io import BytesIO
 from pathlib import Path
 from typing import List
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
 import pytz
@@ -63,6 +63,33 @@ _NO_STORE = {'Cache-Control': 'no-store'}
 def _safe_filename(name: str) -> str:
     """Strip anything that isn't alphanumeric, hyphen, or dot from a filename segment."""
     return _SAFE_FILENAME_RE.sub('_', name) or 'download'
+
+
+_DANCECLOUD_HOSTNAME = urlparse(config.DC_HOST).hostname
+_CARD_CHECK_PATH = re.compile(r'/members/cards/[0-9a-fA-F-]{36}/check')
+_MAX_PROXY_REDIRECTS = 3
+
+
+def _dancecloud_url(url: str, path_pattern: re.Pattern | None = None) -> str | None:
+    """Return a clean URL on the Dancecloud host built from ``url``, or None if ``url`` is not acceptable.
+
+    The scheme must be https, the host must be exactly Dancecloud's, and there must be no userinfo, odd port or
+    fragment. With ``path_pattern`` the path must match it and there may be no query. The result is rebuilt from our
+    configured host plus the validated path, never from the caller's string, so a URL that Python and httpx parse
+    differently (userinfo, backslashes, ...) cannot send the request somewhere else.
+    """
+    try:
+        parsed = urlparse(url)
+        port = parsed.port
+    except ValueError:
+        return None
+    if parsed.scheme != 'https' or parsed.hostname != _DANCECLOUD_HOSTNAME or port not in (None, 443):
+        return None
+    if parsed.username is not None or parsed.password is not None or parsed.params or parsed.fragment:
+        return None
+    if path_pattern is not None and (parsed.query or not path_pattern.fullmatch(parsed.path)):
+        return None
+    return f'{config.DC_HOST}{parsed.path}' + (f'?{parsed.query}' if parsed.query else '')
 
 
 def _is_safe_url(url: str) -> bool:
@@ -131,7 +158,8 @@ async def lifespan_manager(_: FastAPI):
             log.debug('Dancecloud unissued card poller shutdown')
 
 
-app = FastAPI(lifespan=lifespan_manager)
+# No public API documentation: /docs, /redoc and /openapi.json would hand anyone a map of every route.
+app = FastAPI(lifespan=lifespan_manager, docs_url=None, redoc_url=None, openapi_url=None)
 app.mount('/public', StaticFiles(directory=config.PUBLIC_DIR), name='public')
 
 app.add_middleware(
@@ -415,14 +443,29 @@ async def scanner(request: Request):
 async def proxy_card_check(url: str):
     """Prevent CORS from blocking access between the client and Dancecloud.
 
-    Used together with the /membership-cards/scanner route.
+    Used together with the /membership-cards/scanner route. This endpoint is public and makes server-side requests,
+    so it only ever fetches a membership card check page on Dancecloud's own host, and only follows redirects that
+    stay on that host.
     """
-    if url.startswith(config.DC_HOST):
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            resp = await client.get(url)
-        return Response(content=resp.content, status_code=resp.status_code, media_type=resp.headers.get('content-type'))
-    else:
+    target = _dancecloud_url(url, _CARD_CHECK_PATH)
+    if target is None:
         raise HTTPException(status_code=HTTPStatus.BAD_REQUEST, detail='URL not permitted.')
+    try:
+        async with httpx.AsyncClient(follow_redirects=False) as client:
+            resp = await client.get(target)
+            for _ in range(_MAX_PROXY_REDIRECTS):
+                if not resp.is_redirect:
+                    break
+                target = _dancecloud_url(urljoin(target, resp.headers.get('location', '')))
+                if target is None:
+                    raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail='Unexpected redirect.')
+                resp = await client.get(target)
+    except httpx.HTTPError:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail='Could not reach Dancecloud.') from None
+    if resp.is_redirect:
+        raise HTTPException(status_code=HTTPStatus.BAD_GATEWAY, detail='Too many redirects.')
+    # Served as plain text: the scanner only reads it with res.text(), and it must never render as a page on our origin.
+    return Response(content=resp.content, status_code=resp.status_code, media_type='text/plain')
 
 
 @app.get('/membership-cards/checks/logs', response_class=HTMLResponse)

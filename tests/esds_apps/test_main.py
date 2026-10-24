@@ -168,18 +168,104 @@ async def test_landing_page(mock_template):
     mock_template.assert_called_once_with(request, 'landing.html')
 
 
+CARD_UUID = '123e4567-e89b-12d3-a456-426614174000'
+BACKSLASH = chr(92)
+CHECK_URL = f'{config.DC_HOST}/members/cards/{CARD_UUID}/check'
+
+
 def test_proxy_card_check_valid_url(client):
-    target = config.DC_HOST + '/api/dummy'
     with respx.mock:
-        respx.get(target).mock(return_value=httpx.Response(200, content=b'abc', headers={'content-type': 'text/plain'}))
-        response = client.get(f'/proxy-card-check?url={target}')
+        route = respx.get(CHECK_URL).mock(
+            return_value=httpx.Response(200, content=b'abc', headers={'content-type': 'text/html'})
+        )
+        response = client.get('/proxy-card-check', params={'url': CHECK_URL})
     assert response.status_code == HTTPStatus.OK
     assert response.content == b'abc'
+    assert route.called
+    assert response.headers['content-type'].startswith('text/plain')  # never rendered as a page on our origin
 
 
-def test_proxy_card_check_invalid_url(client):
-    response = client.get('/proxy-card-check?url=https://malicious.com')
+@pytest.mark.parametrize(
+    'url',
+    [
+        'https://malicious.com',
+        'https://example.com/',
+        f'https://esds.dancecloud.com@evil.example/members/cards/{CARD_UUID}/check',  # userinfo smuggling
+        f'https://esds.dancecloud.com.evil.example/members/cards/{CARD_UUID}/check',  # look-alike suffix
+        # parser-differential tricks:
+        f'https://evil.example{BACKSLASH}@esds.dancecloud.com/members/cards/{CARD_UUID}/check',
+        f'https://esds.dancecloud.com{BACKSLASH}@evil.example/members/cards/{CARD_UUID}/check',
+        f'https://esds.dancecloud.com:8443/members/cards/{CARD_UUID}/check',
+        f'https://esds.dancecloud.com./members/cards/{CARD_UUID}/check',
+        f'http://esds.dancecloud.com/members/cards/{CARD_UUID}/check',
+        f'//esds.dancecloud.com/members/cards/{CARD_UUID}/check',
+        f'https://127.0.0.1/members/cards/{CARD_UUID}/check',
+        f'{CHECK_URL}?next=http://169.254.169.254/',
+        f'{CHECK_URL}#@evil.example',
+        f'{config.DC_HOST}/api/dummy',
+        f'{config.DC_HOST}/members/cards/../../admin/check',
+        f'{config.DC_HOST}/members/cards/{CARD_UUID}/check/extra',
+        'file:///etc/passwd',
+        '',
+    ],
+)
+def test_proxy_card_check_refuses_anything_but_a_card_check_url_and_never_connects(client, url):
+    with respx.mock(assert_all_called=False) as mock:
+        mock.route().mock(return_value=httpx.Response(200, text='leaked'))
+        response = client.get('/proxy-card-check', params={'url': url})
+        assert not mock.calls, 'the server must not even attempt the request'
     assert response.status_code == HTTPStatus.BAD_REQUEST
+    assert 'leaked' not in response.text
+
+
+def test_proxy_card_check_follows_a_redirect_on_the_same_host(client):
+    with respx.mock:
+        respx.get(CHECK_URL).mock(return_value=httpx.Response(302, headers={'location': '/members/login'}))
+        final = respx.get(f'{config.DC_HOST}/members/login').mock(return_value=httpx.Response(200, content=b'login'))
+        response = client.get('/proxy-card-check', params={'url': CHECK_URL})
+    assert response.status_code == HTTPStatus.OK
+    assert response.content == b'login'
+    assert final.called
+
+
+@pytest.mark.parametrize(
+    'location',
+    [
+        'https://evil.example/x',
+        'http://esds.dancecloud.com/x',
+        'https://esds.dancecloud.com@evil.example/x',
+        'http://169.254.169.254/',
+    ],
+)
+def test_proxy_card_check_does_not_follow_redirects_off_the_dancecloud_host(client, location):
+    with respx.mock(assert_all_called=False) as mock:
+        mock.get(CHECK_URL).mock(return_value=httpx.Response(302, headers={'location': location}))
+        elsewhere = mock.route().mock(return_value=httpx.Response(200, text='leaked'))
+        response = client.get('/proxy-card-check', params={'url': CHECK_URL})
+        assert not elsewhere.called
+    assert response.status_code == HTTPStatus.BAD_GATEWAY
+    assert 'leaked' not in response.text
+
+
+def test_proxy_card_check_gives_up_on_redirect_loops(client):
+    with respx.mock:
+        respx.get(CHECK_URL).mock(return_value=httpx.Response(302, headers={'location': CHECK_URL}))
+        response = client.get('/proxy-card-check', params={'url': CHECK_URL})
+    assert response.status_code == HTTPStatus.BAD_GATEWAY
+
+
+def test_proxy_card_check_reports_an_unreachable_dancecloud_as_bad_gateway(client):
+    with respx.mock:
+        respx.get(CHECK_URL).mock(side_effect=httpx.ConnectError('down'))
+        response = client.get('/proxy-card-check', params={'url': CHECK_URL})
+    assert response.status_code == HTTPStatus.BAD_GATEWAY
+
+
+def test_proxy_card_check_passes_through_dancecloud_error_statuses(client):
+    with respx.mock:
+        respx.get(CHECK_URL).mock(return_value=httpx.Response(404, content=b'nope'))
+        response = client.get('/proxy-card-check', params={'url': CHECK_URL})
+    assert response.status_code == HTTPStatus.NOT_FOUND
 
 
 @pytest.mark.asyncio
@@ -528,3 +614,8 @@ def test_auth_logout_clears_cookie(client):
     response = client.get('/auth/logout')
     assert response.status_code == HTTPStatus.FOUND
     assert response.headers['location'] == '/'
+
+
+@pytest.mark.parametrize('path', ['/docs', '/redoc', '/openapi.json', '/docs/oauth2-redirect'])
+def test_api_documentation_is_not_publicly_served(client, path):
+    assert client.get(path).status_code == HTTPStatus.NOT_FOUND
