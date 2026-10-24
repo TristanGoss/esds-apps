@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <title>{{ title }}</title>
+    <link rel="icon" href="/public/favicon.ico">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="/public/css/site.css">
+</head>
+
+<body>
+    <main class="container">
+        <h1>{{ title }}</h1>
+        <p>{{ message }}</p>
+        <a href="{{ action_url|default('/') }}" role="button">{{ action_label|default('Return to home') }}</a>
+    </main>
+</body>
+
+</html>

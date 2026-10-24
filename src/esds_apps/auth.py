@@ -12,6 +12,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import RedirectResponse
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from joserfc import jwt as jose_jwt
+from joserfc.errors import JoseError
 from joserfc.jwk import KeySet, RSAKey
 
 from esds_apps import config
@@ -111,32 +112,17 @@ async def handle_oauth_callback(request: Request) -> RedirectResponse:
 
     next_path = _safe_next_path(request.cookies.get(_OAUTH_NEXT_COOKIE, '/'))
 
-    # Exchange the auth code for tokens
-    async with httpx.AsyncClient() as client:
-        token_resp = await client.post(
-            _GOOGLE_TOKEN_URL,
-            data={
-                'code': code,
-                'client_id': config.SECRETS['GOOGLE_CLIENT_ID'],
-                'client_secret': config.SECRETS['GOOGLE_CLIENT_SECRET'],
-                'redirect_uri': config.SECRETS['GOOGLE_OAUTH_REDIRECT_URI'],
-                'grant_type': 'authorization_code',
-            },
-        )
-    token_resp.raise_for_status()
-    id_token = token_resp.json()['id_token']
+    try:
+        id_token = await _exchange_code_for_id_token(code)
+    except httpx.HTTPStatusError as e:
+        log.warning(f'Google rejected the OAuth code exchange with status {e.response.status_code}')
+        return _sign_in_failed(request, HTTPStatus.BAD_REQUEST)
 
-    # Verify the ID token using Google's public keys
-    async with httpx.AsyncClient() as client:
-        jwks_resp = await client.get(_GOOGLE_CERTS_URL)
-    jwks = KeySet.import_key_set(jwks_resp.json())
-    token = jose_jwt.decode(id_token, jwks, algorithms=[_GOOGLE_ID_TOKEN_ALG])
-    jose_jwt.JWTClaimsRegistry(
-        iss={'essential': True, 'values': ['https://accounts.google.com', 'accounts.google.com']},
-        aud={'essential': True, 'value': config.SECRETS['GOOGLE_CLIENT_ID']},
-        exp={'essential': True},
-    ).validate(token.claims)
-    email = token.claims['email']
+    try:
+        email = await _verified_email(id_token)
+    except JoseError as e:
+        log.warning(f'Google ID token failed verification: {e}')
+        return _sign_in_failed(request, HTTPStatus.FORBIDDEN)
 
     # Check the user is in the allowed group
     if not await _is_group_member(email):
@@ -154,6 +140,53 @@ async def handle_oauth_callback(request: Request) -> RedirectResponse:
     response.delete_cookie(_OAUTH_STATE_COOKIE)
     response.delete_cookie(_OAUTH_NEXT_COOKIE)
     return response
+
+
+def _sign_in_failed(request: Request, status_code: int):
+    """Render the generic error page for a sign-in that could not be completed, without saying why."""
+    return config.TEMPLATES.TemplateResponse(
+        request,
+        'error.html',
+        {
+            'title': 'Sign-in failed',
+            'message': 'We could not complete your Google sign-in. Please try again.',
+            'action_url': '/auth/login',
+            'action_label': 'Try signing in again',
+        },
+        status_code=status_code,
+    )
+
+
+async def _exchange_code_for_id_token(code: str | None) -> str:
+    """Exchange an OAuth authorization code for Google's ID token; raises HTTPStatusError if Google refuses."""
+    async with httpx.AsyncClient() as client:
+        token_resp = await client.post(
+            _GOOGLE_TOKEN_URL,
+            data={
+                'code': code,
+                'client_id': config.SECRETS['GOOGLE_CLIENT_ID'],
+                'client_secret': config.SECRETS['GOOGLE_CLIENT_SECRET'],
+                'redirect_uri': config.SECRETS['GOOGLE_OAUTH_REDIRECT_URI'],
+                'grant_type': 'authorization_code',
+            },
+        )
+    token_resp.raise_for_status()
+    return token_resp.json()['id_token']
+
+
+async def _verified_email(id_token: str) -> str:
+    """Verify an ID token against Google's public keys and return its email; raises JoseError if invalid."""
+    async with httpx.AsyncClient() as client:
+        jwks_resp = await client.get(_GOOGLE_CERTS_URL)
+    jwks = KeySet.import_key_set(jwks_resp.json())
+    token = jose_jwt.decode(id_token, jwks, algorithms=[_GOOGLE_ID_TOKEN_ALG])
+    jose_jwt.JWTClaimsRegistry(
+        iss={'essential': True, 'values': ['https://accounts.google.com', 'accounts.google.com']},
+        aud={'essential': True, 'value': config.SECRETS['GOOGLE_CLIENT_ID']},
+        exp={'essential': True},
+        email={'essential': True},
+    ).validate(token.claims)
+    return token.claims['email']
 
 
 async def _get_service_account_token(scopes: list[str]) -> str:

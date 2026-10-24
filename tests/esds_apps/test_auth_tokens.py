@@ -1,7 +1,7 @@
 """End-to-end tests of the Google token handling in ``auth`` (ID-token verification and service-account JWT).
 
 Tokens are signed here with ``cryptography`` directly, so the fixtures do not depend on whichever JOSE library
-``auth`` happens to use; only the expected rejection type (``JoseError``) does.
+``auth`` happens to use.
 """
 
 import base64
@@ -16,7 +16,7 @@ import respx
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from fastapi.responses import RedirectResponse
-from joserfc.errors import JoseError
+from fastapi.testclient import TestClient
 
 from esds_apps import auth, config
 
@@ -198,6 +198,7 @@ def _forged_tokens(google_key, other_key):
         'missing_exp': _sign(good_header, _claims(exp=None), google_key),
         'missing_audience': _sign(good_header, _claims(aud=None), google_key),
         'missing_issuer': _sign(good_header, _claims(iss=None), google_key),
+        'missing_email': _sign(good_header, _claims(email=None), google_key),
         'signed_by_other_key': _sign(good_header, _claims(), other_key),
         'unknown_kid': _sign({'alg': 'RS256', 'kid': 'not-a-real-kid'}, _claims(), google_key),
         'alg_none': unsigned,
@@ -215,6 +216,7 @@ def _forged_tokens(google_key, other_key):
         'missing_exp',
         'missing_audience',
         'missing_issuer',
+        'missing_email',
         'signed_by_other_key',
         'unknown_kid',
         'alg_none',
@@ -227,10 +229,41 @@ async def test_forged_or_invalid_tokens_never_log_in(case, secrets, google_key, 
     token = _forged_tokens(google_key, other_key)[case]
     group_route, _ = _mock_google(token, _jwks(google_key))
 
-    with pytest.raises(JoseError):
-        await auth.handle_oauth_callback(_request())
+    response = await auth.handle_oauth_callback(_request())
 
+    assert response.status_code == 403
+    assert b'Sign-in failed' in response.body
+    assert 'set-cookie' not in response.headers
     assert not group_route.called  # rejected before we ever asked whether this user is allowed in
+
+
+@respx.mock
+async def test_refused_code_exchange_shows_error_page(secrets):
+    respx.post(auth._GOOGLE_TOKEN_URL).mock(return_value=httpx.Response(400, json={'error': 'invalid_grant'}))
+
+    response = await auth.handle_oauth_callback(_request())
+
+    assert response.status_code == 400
+    assert b'Sign-in failed' in response.body
+    assert b'/auth/login' in response.body
+    assert 'set-cookie' not in response.headers
+
+
+@respx.mock
+def test_forged_token_through_the_real_app_returns_an_html_error_page(secrets, google_key, other_key):
+    from esds_apps.main import app
+
+    token = _sign({'alg': 'RS256', 'kid': KID}, _claims(), other_key)
+    _mock_google(token, _jwks(google_key))
+    client = TestClient(app, base_url='https://testserver', raise_server_exceptions=False)
+    client.cookies.set(auth._OAUTH_STATE_COOKIE, 'st')
+
+    response = client.get('/auth/callback', params={'code': 'auth-code', 'state': 'st'})
+
+    assert response.status_code == 403
+    assert response.headers['content-type'].startswith('text/html')
+    assert 'Sign-in failed' in response.text
+    assert config.AUTH_COOKIE_NAME not in response.cookies
 
 
 @respx.mock
