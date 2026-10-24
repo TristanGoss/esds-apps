@@ -97,3 +97,6 @@ testpaths = ["tests"]
 addopts = "--cov=src --cov-fail-under=80"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+# WeasyPrint wants the HarfBuzz-Subset system library. The Docker image installs it (see Dockerfile); dev machines
+# without it (e.g. Windows) can't, and the warning then drowns out real ones.
+filterwarnings = ["ignore:HarfBuzz-Subset will be required:DeprecationWarning"]

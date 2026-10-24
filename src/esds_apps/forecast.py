@@ -24,6 +24,7 @@ import datetime
 import io
 import sqlite3
 import threading
+from contextlib import closing
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
@@ -397,7 +398,7 @@ def _build_context() -> ForecastContext:  # noqa: PLR0915  (a single sweep of th
     if not db.exists():
         raise FileNotFoundError(db)
 
-    with sqlite3.connect(f'file:{db}?mode=ro', uri=True) as conn:
+    with closing(sqlite3.connect(f'file:{db}?mode=ro', uri=True)) as conn:
         # ---- Level 1 terms: interest (= reg + waitlist) and the weekly attendance series ----
         l1_rows = []
         for eid, start, weeks in conn.execute(
