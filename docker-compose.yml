@@ -11,6 +11,9 @@ services:
     expose:
     - "8080"
     volumes:
+      # Secrets. This file is not in the repository, so create it on the host first (see README); it must be readable
+      # by uid 1001 (appuser). If it is missing, Docker creates an empty *directory* here and the app refuses to start.
+      - ./.env:/app/.env:ro
       # Host directory must be writable by uid 1001 (appuser). Run once: mkdir -p esds_cache && chown 1001:1001 esds_cache
       - ./esds_cache:/tmp/esds_cache
       - ./esds-group-checker-sa.json:/run/secrets/esds-group-checker-sa.json:ro

@@ -8,6 +8,8 @@ The first use of this repository is the provision of an add-on for dancecloud.co
 ## Secrets
 Some settings are not present in config.py, and instead need to be provided by creating a `.env` file in the repository after it has been checked out. If you are planning to develop this code further and would like some relevant values for these settings, please email info@esds.org.uk to request them.
 
+In production (Docker), the `.env` file is not copied into the image. `docker-compose.yml` mounts it read-only at `/app/.env`, so it must exist next to `docker-compose.yml` on the host and be readable by uid 1001 (`chmod 644 .env`). If it is missing, Docker creates an empty directory called `.env` instead and the app will refuse to start.
+
 The required variables are:
 
 | Variable | Description |

@@ -1,0 +1,16 @@
+# Keep secrets and local-only data out of the build context entirely, whatever the Dockerfile COPYs.
+**/.env
+**/*.env
+client_secret*.json
+esds-group-checker-sa.json
+esds_cache/
+working/
+.git/
+.vsode/
+.venv/
+**/__pycache__/
+**/*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+tests/

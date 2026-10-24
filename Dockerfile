@@ -32,9 +32,8 @@ COPY ./fonts/futura /usr/local/share/fonts
 # Rebuild font cache to include provided fonts
 RUN fc-cache -f -v
 
-# Remember this file is not present in the repo, you need to add it manually!
-# It contains the secrets that are not stored in the repository
-COPY ./.env /app/.env
+# Secrets are deliberately NOT baked into the image: docker-compose.yml mounts ./.env at /app/.env (read-only) at run
+# time, so they never sit in an image layer.
 
 ENV PYTHONPATH=/app/src
 
