@@ -9,7 +9,7 @@ from urllib.parse import urlencode
 
 import httpx
 from fastapi import HTTPException, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, Response
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 from joserfc import jwt as jose_jwt
 from joserfc.errors import JoseError
@@ -98,17 +98,19 @@ def build_login_redirect(next_path: str) -> RedirectResponse:
     return response
 
 
-async def handle_oauth_callback(request: Request) -> RedirectResponse:
-    """Process the Google OAuth callback; set a session cookie and redirect on success."""
+async def handle_oauth_callback(request: Request) -> Response:
+    """Process the Google OAuth callback; set a session cookie and redirect on success, else show an error page."""
     error = request.query_params.get('error')
     if error:
-        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail=f'Google OAuth error: {error}')
+        log.warning('Google reported an OAuth error: %r', error)
+        return _sign_in_failed(request, HTTPStatus.FORBIDDEN)
 
     code = request.query_params.get('code')
     state = request.query_params.get('state')
     expected_state = request.cookies.get(_OAUTH_STATE_COOKIE)
     if not state or state != expected_state:
-        raise HTTPException(status_code=HTTPStatus.FORBIDDEN, detail='Invalid OAuth state — possible CSRF.')
+        log.warning('OAuth callback state did not match the state cookie, possible CSRF')
+        return _sign_in_failed(request, HTTPStatus.FORBIDDEN)
 
     next_path = _safe_next_path(request.cookies.get(_OAUTH_NEXT_COOKIE, '/'))
 

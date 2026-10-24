@@ -171,11 +171,12 @@ def test_set_session_cookie_calls_set_cookie():
 @pytest.mark.asyncio
 async def test_oauth_callback_google_error_param():
     request = MagicMock()
-    request.query_params.get = lambda k, *_: 'access_denied' if k == 'error' else None
-    with pytest.raises(HTTPException) as exc:
-        await handle_oauth_callback(request)
-    assert exc.value.status_code == HTTPStatus.FORBIDDEN
-    assert 'access_denied' in exc.value.detail
+    request.query_params.get = lambda k, *_: '<b>access_denied</b>' if k == 'error' else None
+    response = await handle_oauth_callback(request)
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    assert b'Sign-in failed' in response.body
+    assert b'access_denied' not in response.body  # attacker-controlled text is never reflected
+    assert 'set-cookie' not in response.headers
 
 
 @pytest.mark.asyncio
@@ -183,7 +184,7 @@ async def test_oauth_callback_bad_state():
     request = MagicMock()
     request.query_params.get = lambda k, *_: None if k == 'error' else 'some-code' if k == 'code' else 'wrong-state'
     request.cookies.get = lambda *_: 'expected-state'
-    with pytest.raises(HTTPException) as exc:
-        await handle_oauth_callback(request)
-    assert exc.value.status_code == HTTPStatus.FORBIDDEN
-    assert 'CSRF' in exc.value.detail
+    response = await handle_oauth_callback(request)
+    assert response.status_code == HTTPStatus.FORBIDDEN
+    assert b'Sign-in failed' in response.body
+    assert 'set-cookie' not in response.headers
