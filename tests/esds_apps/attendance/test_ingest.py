@@ -10,6 +10,7 @@ from .workbooks import (
     _booking_by_activity_ws,
     _booking_summary_ws,
     _checked_in_by_activity_ws,
+    _l2_so_day_month_ws,
     _roster_ws,
     _swingout_ws,
     _waitlist_wb,
@@ -225,6 +226,35 @@ def test_ingest_file_uses_supplied_rel_label(tmp_path, db):
 
     report = ingest.ingest_file(path, db, rel='sub/May-Jun 2025 Attendance_pseudonymised.xlsx')
     assert all(src == 'sub/May-Jun 2025 Attendance_pseudonymised.xlsx' for src, _, _ in report.handled)
+
+
+def test_ingest_file_only_sheets_restricts_the_run(tmp_path, db):
+    """only_sheets ingests just the named tabs; the rest are neither ingested nor reported."""
+    wb = _roster_ws().parent
+    wb.active.title = 'Level 1 Attendance'
+    other = wb.copy_worksheet(wb.active)
+    other.title = 'Shag Attendance'
+    path = tmp_path / 'Sept-Oct 2026 Attendance_pseudonymised.xlsx'
+    wb.save(path)
+
+    report = ingest.ingest_file(path, db, only_sheets={'Level 1 Attendance'})
+    assert [sheet for _, sheet, _ in report.handled] == ['Level 1 Attendance']
+    assert report.unhandled == [] and report.redundant == []
+    assert db.conn.execute('SELECT COUNT(*) FROM ingest_log').fetchone() == (1,)
+
+
+def test_ingest_file_reads_year_less_l2_so_headers_using_the_workbooks_year(tmp_path, db):
+    """The year for text-dated session columns comes from dated cells elsewhere in the workbook."""
+    ws = _l2_so_day_month_ws()
+    wb = ws.parent
+    wb.create_sheet('Ticketing Exceptions')['D7'] = datetime(2026, 9, 17)  # the only real date: fixes the year
+    path = tmp_path / 'Sept-Oct 2026 Attendance_pseudonymised.xlsx'
+    wb.save(path)
+
+    report = ingest.ingest_file(path, db)
+    assert [(sheet, parser) for _, sheet, parser in report.handled] == [('L2 and SO Attendance', 'l2_so_attendance')]
+    assert report.unhandled == []
+    assert db.conn.execute('SELECT MIN(date), MAX(date) FROM activity').fetchone() == ('2026-09-10', '2026-10-01')
 
 
 def test_ingest_file_skips_membership_workbook(tmp_path, db):

@@ -146,6 +146,25 @@ def _l2_so_absent_heavy_ws(title='L2 and SO Attendance'):
     return ws
 
 
+def _l2_so_day_month_ws(title='L2 and SO Attendance'):
+    """The Sept-Oct 2026 L2 & SO sheet: session dates typed as year-less text ('10th Sept'), not date cells.
+
+    Instructions sit above a header on row 6, a 'Concession / Member?' column precedes the sessions, and a
+    'Times attended' formula column and COUNTIF summary rows follow. The year only exists elsewhere in the workbook.
+    """
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = title
+    ws['B2'] = 'To populate the summary table from the Dancecloud records:'
+    ws['B6'], ws['C6'], ws['D6'] = 'dancer_id', 'redacted', 'Concession / Member?'
+    ws['E6'], ws['F6'], ws['G6'], ws['H6'] = '10th Sept', '17th Sep', '1st Oct', 'Times attended'
+    ws['B7'], ws['D7'], ws['E7'], ws['F7'], ws['G7'] = 'DNC-1', 'No', 'Level 2 & Social', 'Absent', 'Social-Only'
+    ws['B8'], ws['D8'], ws['E8'], ws['F8'], ws['G8'] = 'DNC-2', 'Yes', 'Absent', 'Level 2 & Social', 'Absent'
+    ws['H7'], ws['H8'] = '=3-COUNTIF(E7:G7,"Absent")', '=3-COUNTIF(E8:G8,"Absent")'
+    ws['C9'], ws['E9'], ws['F9'] = 'Level 2', '=COUNTIF(E7:E8,"Level 2 & Social")', '=COUNTIF(F7:F8,"Level 2 & Social")'
+    return ws
+
+
 def _l1_attendance_2026_ws(title='2026 L1 Attendance'):
     """A 2026 L1 Attendance sheet: dates in the header row, session names optional."""
     wb = openpyxl.Workbook()

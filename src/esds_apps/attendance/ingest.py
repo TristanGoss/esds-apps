@@ -9,6 +9,7 @@ need a new parser) as well as the redundant 'Attendees' rollups.
 
 import re
 from collections import Counter
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -133,12 +134,15 @@ def ingest_file(
     parsers: list | None = None,
     rel: str | None = None,
     report: IngestReport | None = None,
+    only_sheets: Collection[str] | None = None,
 ) -> IngestReport:
     """Ingest one already-pseudonymised ``.xlsx`` into ``db``; return its IngestReport.
 
     The dancers it references must already exist in the ``dancer`` table (pseudonymise the file
     first); the foreign keys reject attendance for an unknown dancer. Idempotent: the write API
     upserts, so re-ingesting the same file refreshes its rows rather than duplicating them.
+    ``only_sheets`` restricts the run to those exact tab titles (other tabs are left out of the report
+    entirely), for ingesting part of a workbook now and the rest later.
     """
     parsers = parsers if parsers is not None else PARSERS
     report = report if report is not None else IngestReport()
@@ -151,6 +155,8 @@ def ingest_file(
     term, year, anchor = _term_from(path), _resolve_year(wb, path), _week_anchor(wb)
     redundant_titles = _redundant_rollup_titles(wb)
     for ws in wb.worksheets:
+        if only_sheets is not None and ws.title not in only_sheets:
+            continue
         ws_lower = ws.title.strip().lower()
         if any(pattern in ws_lower for pattern in _NON_ATTENDANCE_SHEETS):
             continue  # skip non-attendance sheets

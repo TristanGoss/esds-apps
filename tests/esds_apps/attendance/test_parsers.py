@@ -24,6 +24,7 @@ from .workbooks import (
     _dancer_list_no_marker_ws,
     _l1_attendance_2026_ws,
     _l2_so_absent_heavy_ws,
+    _l2_so_day_month_ws,
     _l2_so_ws,
     _roster_concession_ws,
     _roster_weekly_ws,
@@ -255,13 +256,29 @@ def test_course_event_name_folds_window_only_when_name_lacks_a_month():
         parsers._course_event_name('Level 1 Fundamentals Term B', 2022, 'Level 1', 'Mar-Apr 2022')
         == 'Level 1 Fundamentals Term B (Mar-Apr 2022)'
     )
-    # the newer termly name already says 'May-Jun', so repeating it is noise: keep the plain year
-    assert parsers._course_event_name('May-Jun 2025', 2025, 'Level 1', 'May 2025') == 'May-Jun 2025 Level 1 (2025)'
+    # the newer termly name already says 'May-Jun 2025': the window and the year would both repeat it
+    assert parsers._course_event_name('May-Jun 2025', 2025, 'Level 1', 'May 2025') == 'May-Jun 2025 Level 1'
+    assert parsers._course_event_name('Sept-Oct 2026', 2026, 'Shag') == 'Sept-Oct 2026 Shag'
+    # a month-named term without the year still needs one, so same-named terms in different years stay apart
+    assert parsers._course_event_name('May-Jun', 2025, 'Level 1') == 'May-Jun Level 1 (2025)'
     # no window available -> bare year, as before
     assert (
         parsers._course_event_name('Level 1 Fundamentals Term B', 2022, 'Level 1')
         == 'Level 1 Fundamentals Term B (2022)'
     )
+
+
+@pytest.mark.parametrize(
+    ('texts', 'expected'),
+    [
+        (('Shag Attendance', 'Sept-Oct 2026'), 'Shag'),
+        (('Collegiate Shag Workshop', 'Workshop and Tea Dance'), 'Shag'),
+        (('Level 2 Shag', None), 'Level 2'),  # a level named alongside it still wins: first pattern to match
+        (('Shagging Wagon', None), None),  # whole word only
+    ],
+)
+def test_difficulty_for_tags_shag(texts, expected):
+    assert parsers._difficulty_for(*texts) == expected
 
 
 # ---- matchers ----
@@ -330,6 +347,61 @@ def test_absent_heavy_l2_so_parses_lesson_and_social(db):
     assert socials >= 1  # the 'Social-Only' row creates a social activity
 
 
+def test_l2_so_matches_year_less_day_month_headers():
+    """Session dates typed as text ('10th Sept') still identify the sheet; only the L2/SO parser reads them."""
+    ws = _l2_so_day_month_ws()
+    winner = next((p for p in parsers.PARSERS if p.matches(ws)), None)
+    assert winner is not None and winner.name == 'l2_so_attendance'
+
+
+def test_l2_so_parses_year_less_day_month_headers(db):
+    """Each text-dated column becomes a night in the workbook's year, split into Level 2 and social by category."""
+    parsers.L2SOAttendanceParser().parse(_l2_so_day_month_ws(), db, term='Sept-Oct 2026', year=2026, ingest_id=None)
+    rows = db.conn.execute(
+        'SELECT a.date, a.activity_type, at.dancer_id, at.status FROM attendance at '
+        'JOIN activity a USING(activity_id) ORDER BY a.date, at.dancer_id'
+    ).fetchall()
+    assert rows == [
+        ('2026-09-10', 'lesson', 'DNC-1', 'attended'),
+        ('2026-09-10', 'lesson', 'DNC-2', 'absent'),
+        ('2026-09-17', 'lesson', 'DNC-1', 'absent'),
+        ('2026-09-17', 'lesson', 'DNC-2', 'attended'),
+        ('2026-10-01', 'social', 'DNC-1', 'attended'),
+        ('2026-10-01', 'lesson', 'DNC-2', 'absent'),
+    ]
+    assert db.conn.execute('SELECT name FROM event').fetchall() == [('Sept-Oct 2026 Level 2',)]
+
+
+def test_year_less_day_month_headers_are_only_sessions_when_asked():
+    """Other layouts keep ignoring such a header cell: the day-month reading is opt-in per parser."""
+    matrix = list(_l2_so_day_month_ws().iter_rows(values_only=True))
+    assert parsers._session_columns(matrix, 5, 2026) == []
+    opted_in = parsers._session_columns(matrix, 5, 2026, day_month_labels=True)
+    assert [dt.date().isoformat() for _, _, dt in opted_in] == ['2026-09-10', '2026-09-17', '2026-10-01']
+    # no year yet (as in matches()): still recognised as sessions, left undated
+    assert [dt for _, _, dt in parsers._session_columns(matrix, 5, day_month_labels=True)] == [None] * 3
+
+
+@pytest.mark.parametrize(
+    ('label', 'expected'),
+    [
+        ('10th Sept', True),
+        ('1st Oct', True),
+        ('17 Sep', True),
+        ('3rd November', True),
+        ('Times attended', False),
+        ('Concession / Member?', False),
+        ('Level 2', False),
+        ('2026-09-10', False),
+        ('Week 1 (10 Sep)', False),
+        (None, False),
+        ('', False),
+    ],
+)
+def test_is_day_month_label(label, expected):
+    assert parsers._is_day_month_label(label) is expected
+
+
 def test_social_register_matches_only_undated_present_sheets():
     assert parsers.SocialRegisterParser().matches(_social_register_ws())
     assert not parsers.SocialRegisterParser().matches(_roster_ws())  # has dated session columns
@@ -381,7 +453,7 @@ def test_roster_parse_creates_event_and_activities(db):
     parsers.RosterParser().parse(_roster_ws(), db, term='May-Jun 2025', year=2025, ingest_id=None)
     ev = db.conn.execute('SELECT name, event_type FROM event').fetchone()
     # canonical course event name: 'Attendance' stripped, level folded in, year suffixed
-    assert ev == ('May-Jun 2025 Level 1 (2025)', 'course')
+    assert ev == ('May-Jun 2025 Level 1', 'course')
     acts = db.conn.execute('SELECT name, date FROM activity ORDER BY date').fetchall()
     # canonical course activity names: level (difficulty) + date, shared across every source
     assert acts == [('Level 1 (2025-05-22)', '2025-05-22'), ('Level 1 (2025-05-29)', '2025-05-29')]
@@ -393,7 +465,7 @@ def test_roster_2026_format_with_dates_in_header(db):
     """The 2026 L1 format has dates in the header row, not the row above."""
     parsers.RosterParser().parse(_l1_attendance_2026_ws(), db, term='Jan 2026', year=2026, ingest_id=None)
     ev = db.conn.execute('SELECT name, event_type FROM event').fetchone()
-    assert ev == ('Jan 2026 Level 1 (2026)', 'course')  # '2026 L1' title yields the 'Level 1' fold
+    assert ev == ('Jan 2026 Level 1', 'course')  # '2026 L1' title yields the 'Level 1' fold
     acts = db.conn.execute('SELECT name, date FROM activity ORDER BY date').fetchall()
     # canonical course activity names from level + date; the header 'Week N' labels are not used
     assert acts == [('Level 1 (2026-01-15)', '2026-01-15'), ('Level 1 (2026-01-22)', '2026-01-22')]
@@ -514,6 +586,39 @@ def test_roster_embedded_week_dates_need_a_year(db):
     assert db.conn.execute('SELECT COUNT(*) FROM activity').fetchone() == (0,)
 
 
+def test_roster_shag_tab_becomes_its_own_course_event(db):
+    """A 'Shag Attendance' tab is a separate Shag course in the term, not an unnamed lump or a Level 1."""
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = 'Shag Attendance'
+    ws['B2'], ws['C2'], ws['D2'], ws['E2'], ws['F2'] = (
+        'dancer_id',
+        'redacted',
+        'Concession',
+        datetime(2026, 9, 17),
+        datetime(2026, 9, 24),
+    )
+    ws['B3'], ws['D3'], ws['E3'], ws['F3'] = 'DNC-1', 'Yes', 'Yes', 'No'
+    ws['B4'], ws['D4'], ws['E4'], ws['F4'] = 'DNC-2', 'No', 'Yes', 'Yes'
+
+    parsers.RosterParser().parse(ws, db, term='Sept-Oct 2026', year=2026, ingest_id=None)
+
+    assert db.conn.execute('SELECT name, event_type FROM event').fetchall() == [('Sept-Oct 2026 Shag', 'course')]
+    assert db.conn.execute('SELECT name, activity_type, difficulty, date FROM activity ORDER BY date').fetchall() == [
+        ('Shag (2026-09-17)', 'lesson', 'Shag', '2026-09-17'),
+        ('Shag (2026-09-24)', 'lesson', 'Shag', '2026-09-24'),
+    ]
+    assert db.conn.execute(
+        'SELECT a.date, at.dancer_id, at.status, at.ticket_type FROM attendance at JOIN activity a USING(activity_id) '
+        'ORDER BY a.date, at.dancer_id'
+    ).fetchall() == [
+        ('2026-09-17', 'DNC-1', 'attended', 'member_or_concession'),
+        ('2026-09-17', 'DNC-2', 'attended', 'ordinary'),
+        ('2026-09-24', 'DNC-1', 'absent', 'member_or_concession'),
+        ('2026-09-24', 'DNC-2', 'attended', 'ordinary'),
+    ]
+
+
 def test_roster_captures_concession_as_ticket_type(db):
     """A roster's Concession column maps each dancer into ordinary vs member-or-concession."""
     parsers.RosterParser().parse(_roster_concession_ws(), db, term='T', year=2025, ingest_id=None)
@@ -610,7 +715,7 @@ def test_count_grid_undated_uses_anchor_and_normalises_level(db):
     parsers.Level2CountGridParser().parse(
         _count_grid_undated_ws(), db, term='Nov-Dec 2023', year=2023, ingest_id=None, week_anchor=datetime(2023, 11, 9)
     )
-    assert db.conn.execute('SELECT name FROM event').fetchone() == ('Nov-Dec 2023 Level 2 (2023)',)
+    assert db.conn.execute('SELECT name FROM event').fetchone() == ('Nov-Dec 2023 Level 2',)
     acts = db.conn.execute('SELECT name, date, difficulty FROM activity ORDER BY date').fetchall()
     assert acts == [
         ('Level 2 (2023-11-09)', '2023-11-09', 'Level 2'),
@@ -625,7 +730,7 @@ def test_l2_so_parse_maps_categories_to_lesson_and_social(db):
     """Each night yields a Level 2 lesson and/or a social; activities are created lazily."""
     parsers.L2SOAttendanceParser().parse(_l2_so_ws(), db, term='Jan 2026', year=2026, ingest_id=None)
     ev = db.conn.execute('SELECT name, event_type FROM event').fetchone()
-    assert ev == ('Jan 2026 Level 2 (2026)', 'course')
+    assert ev == ('Jan 2026 Level 2', 'course')
 
     # Only the (date, kind) pairs that actually occur are created — no phantom activities,
     # and the '=countif(...)' summary row is never read as a category.
@@ -846,7 +951,7 @@ def test_dancecloud_activity_splits_paired_ticket_and_reads_check_ins(db):
     # one ticket, two activities on the same date: a lesson (the workshop) and a social (the tea dance)
     acts = db.conn.execute('SELECT name, activity_type, difficulty, date FROM activity ORDER BY name').fetchall()
     assert acts == [
-        ('Collegiate Shag Workshop', 'lesson', None, '2026-05-10'),
+        ('Collegiate Shag Workshop', 'lesson', 'Shag', '2026-05-10'),
         ('Tea Dance', 'social', 'social', '2026-05-10'),
     ]
     rows = db.conn.execute(

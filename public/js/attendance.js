@@ -21,6 +21,7 @@ const DIFFICULTY_SYMBOLS = {
   'advanced': 'triangle-right',
   'Improvers / Intermediate': 'diamond',
   'Intermediate / Advanced': 'hexagon',
+  'Shag': 'pentagon',
   'social': 'x',
   'other': 'circle',
 };
@@ -37,6 +38,7 @@ const SYMBOL_D = {
   'cross': 'M-3,-10 H3 V-3 H10 V3 H3 V10 H-3 V3 H-10 V-3 H-3 Z',
   'x': 'M-9,-6 L-6,-9 L0,-3 L6,-9 L9,-6 L3,0 L9,6 L6,9 L0,3 L-6,9 L-9,6 L-3,0 Z',
   'hexagon': 'M0,-10 L8.7,-5 L8.7,5 L0,10 L-8.7,5 L-8.7,-5 Z',
+  'pentagon': 'M0,-10 L9.5,-3 L5.9,8 L-5.9,8 L-9.5,-3 Z',
 };
 
 const DANCER_GREY = '#555555';

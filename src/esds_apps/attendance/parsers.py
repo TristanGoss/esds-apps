@@ -255,6 +255,18 @@ def _date_from_day_month(text: str, year: int | None) -> datetime | None:
     return None
 
 
+# A header cell that is nothing but a year-less day and month: '10th Sept', '1st Oct', '17 Sep'.
+_DAY_MONTH_LABEL_RE = re.compile(r'(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,9})\.?')
+
+
+def _is_day_month_label(label: str | None) -> bool:
+    """True if a header cell is just a year-less 'DD[th] Mon[th]' (a session date typed as text)."""
+    if not label:
+        return False
+    m = _DAY_MONTH_LABEL_RE.fullmatch(label.strip())
+    return bool(m and _month_number(m.group(2)))
+
+
 def _activity_type_for(label: str, event_type: EventType) -> ActivityType:
     """An activity's type. A social event holds only socials; otherwise the label decides.
 
@@ -322,6 +334,7 @@ _DIFFICULTY_PATTERNS = [
     (re.compile(r'\bbeg', re.IGNORECASE), 'beginners'),  # beginner(s), 'Begn'
     (re.compile(r'\binterm', re.IGNORECASE), 'intermediate'),
     (re.compile(r'\badv', re.IGNORECASE), 'advanced'),
+    (re.compile(r'\bshag\b', re.IGNORECASE), 'Shag'),  # a course in its own right, not a level; tagged here for now
 ]
 
 
@@ -376,7 +389,11 @@ def _concession_col(header: tuple) -> int | None:
 
 
 def _session_columns(
-    matrix: list[tuple], header_row: int, year: int | None = None, week_anchor: datetime | None = None
+    matrix: list[tuple],
+    header_row: int,
+    year: int | None = None,
+    week_anchor: datetime | None = None,
+    day_month_labels: bool = False,
 ) -> list[tuple]:
     """Session columns: a date either in the header row itself or the row directly above it.
 
@@ -387,6 +404,9 @@ def _session_columns(
     ``week_anchor + 7*(N-1)``. A 'Week N' column is recognised as a session even when neither the
     year nor the anchor is available — so layout detection (``matches``) sees it — with its date
     left None; ``parse`` is always given the year/anchor and skips any column still left undated.
+    With ``day_month_labels`` a header cell that is only a year-less day and month ('10th Sept') is also a
+    session, dated from ``year`` (or left None, like a 'Week N' column, until a year is known). It is opt-in
+    because only the L2 & SO tab is typed that way; for every other layout such a cell is not a session.
     Returns a list of (col_index, activity_name, datetime|None); activity type is decided in parse.
     """
     head = matrix[header_row]
@@ -396,7 +416,9 @@ def _session_columns(
         label = head[c] if c < len(head) and isinstance(head[c], str) else None
         in_header = _parse_dt(head[c]) if c < len(head) else None
         dt = in_header or (_parse_dt(above[c]) if c < len(above) else None)
-        if dt is None:
+        if dt is None and day_month_labels and _is_day_month_label(label):
+            dt = _date_from_day_month(label, year)
+        elif dt is None:
             if not (label and _WEEK_NO_RE.search(label)):
                 continue  # no date and not a 'Week N' column → not a session
             wm = _WEEK_RE.search(label)  # 'Week N (DD Mon)' dates itself given the year
@@ -844,7 +866,7 @@ class L2SOAttendanceParser(Parser):
         header = _roster_header(matrix)
         if header is None:
             return False
-        sessions = _session_columns(matrix, header[0])
+        sessions = _session_columns(matrix, header[0], day_month_labels=True)
         return bool(sessions)
 
     def parse(
@@ -859,7 +881,7 @@ class L2SOAttendanceParser(Parser):
         """Ingest one L2 & SO tab: a Level 2 lesson and a social per night, by ticket category."""
         matrix = list(ws.iter_rows(values_only=True))
         header_row, dancer_col = _roster_header(matrix)
-        sessions = _session_columns(matrix, header_row, year)
+        sessions = _session_columns(matrix, header_row, year, day_month_labels=True)
 
         title = ws.title
         event_type = _event_type_for(title)
@@ -1543,7 +1565,7 @@ class StockbridgeSwingoutParser(Parser):
 
 # A waitlist export names its dancecloud event in the filename, but that booking title rarely
 # matches the event name the attendance ingest settled on: a termly course is named for its
-# month window ('Levels 1-2 (Feb-Mar 2024) Level 1 (2024)'), not for the booking's 'Beginners
+# month window ('Levels 1-2 (Feb-Mar 2024) Level 1'), not for the booking's 'Beginners
 # Level 1 Lindy Hop 6 week block'. There is no shared key to derive one from the other, so the
 # historical waitlists are mapped by hand. The key is (booking title, year), with an optional
 # third element — the month of the earliest 'Joined' date — used only where (title, year) alone
@@ -1556,8 +1578,8 @@ _WAITLIST_EVENTS: dict[tuple, str] = {
     ('Beginners 1920s Charleston Workshop with Charlie DecaVita', 2022): (
         'Beginners 1920s Charleston Workshop with Charlie DecaVita (2022)'
     ),
-    ('Beginners Level 1 Lindy Hop 6 week block', 2024): 'Levels 1-2 (Feb-Mar 2024) Level 1 (2024)',
-    ('Beginners Level 1- six week block of Lindy Hop classes', 2025): 'Jan-Feb 2025 Level 1 (2025)',
+    ('Beginners Level 1 Lindy Hop 6 week block', 2024): 'Levels 1-2 (Feb-Mar 2024) Level 1',
+    ('Beginners Level 1- six week block of Lindy Hop classes', 2025): 'Jan-Feb 2025 Level 1',
     ('Christmas End of Term Band Social Dance', 2022): 'Christmas End of Term Band Social Dance (2022)',
     (
         'Christmas Party with Ian Ewing and the Chevaliers',
@@ -1565,8 +1587,8 @@ _WAITLIST_EVENTS: dict[tuple, str] = {
     ): 'Christmas Party with Ian Ewing and the Chevaliers (2023)',
     ('Christmas Party with the Castle Rock Jazz Band', 2024): 'Nov-Dec 2024: Christmas Party 19th Dec',
     ('ESDS Level 1 Fundamentals classes Feb March', 2022): 'ESDS Level 1 Fundamentals classes Feb March (2022)',
-    ('Level 1 - 5 week block', 2023): 'Levels 1-3 (Oct-Nov 2023) Level 1 (2023)',
-    ('Level 1 Beginners Lindy Hop', 2024): 'Levels 1-2 (Jan-Feb 2024) Level 1 (2024)',
+    ('Level 1 - 5 week block', 2023): 'Levels 1-3 (Oct-Nov 2023) Level 1',
+    ('Level 1 Beginners Lindy Hop', 2024): 'Levels 1-2 (Jan-Feb 2024) Level 1',
     ('Level 1 Fundamentals Term A', 2023): 'Level 1 Fundamentals Term A (Jan-Feb 2023)',
     ('Level 1 Fundamentals Term A', 2022): 'Level 1 Fundamentals Term A (Sep-Oct 2022)',
     ('Level 1 Fundamentals Term A (6 weeks)', 2022): 'Level 1 Fundamentals Term A (6 weeks) (May-Jun 2022)',
@@ -1744,13 +1766,16 @@ def _course_event_name(term: str, year: int | None, difficulty: str | None, wind
     The *time* axis is folded in the same way: when the term name has no month of its own, the
     session-date ``window`` replaces the plain year so ESDS's reused 'Term A/B' labels separate
     within a year. A name that already names its months ('May-Jun 2025') is trusted as-is, both
-    to avoid repetition and because all its sources share that name and so stay converged.
+    to avoid repetition and because all its sources share that name and so stay converged. Likewise a
+    name that already carries the year ('May-Jun 2025 Level 1') is not given a second one.
     """
     base = _EXPORT_SUFFIX_RE.sub('', _strip_attendance(term)).strip()
     if difficulty and difficulty.lower() not in base.lower():
         base = f'{base} {difficulty}'.strip()
     if window and not _has_month_name(base):
         return f'{base} ({window})'
+    if year and str(year) in base:
+        return base  # the term name already carries the year ('Sept-Oct 2026'); a '(2026)' suffix would repeat it
     return f'{base} ({year})' if year else base
 
 
